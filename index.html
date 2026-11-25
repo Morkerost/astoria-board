@@ -1,0 +1,1839 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>Huiro</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f5d65f'/%3E%3Cpath d='M7 7h18v12l-6 6H7z' fill='%23242522'/%3E%3C/svg%3E">
+  <style>
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", Arial, sans-serif;
+  color: #292b26;
+  --header: 0px;
+  --chrome: #262724;
+}
+* { box-sizing: border-box; }
+body { margin: 0; overflow: hidden; background: #f8f8f3; }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: transparent; }
+button:focus-visible, [tabindex="0"]:focus-visible { outline: 3px solid #485df7; outline-offset: 3px; }
+[hidden] { display: none !important; }
+.symbol-library { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+.icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.topbar { position: fixed; z-index: 5; inset: 10px 12px auto; display: flex; align-items: flex-start; justify-content: space-between; pointer-events: none; user-select: none; }
+.board-panel, .actions-panel { pointer-events: auto; display: flex; align-items: center; height: 48px; background: #fff; border: 1px solid #e9e9e7; border-radius: 13px; box-shadow: 0 2px 5px #23241e0e, 0 1px 2px #23241e07; }
+.board-panel { padding: 0 17px 0 12px; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 6px; font-size: 24px; font-weight: 700; letter-spacing: -1.2px; line-height: 1; }
+.brand svg { width: 28px; height: 28px; }
+h1 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.3; }
+.actions-panel { gap: 16px; padding: 5px 6px 5px 15px; }
+.saved { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #61645a; }
+.saved i { width: 7px; height: 7px; border-radius: 50%; background: #75a878; }
+.saved.unsaved i { background: #d5a548; }
+.add-button { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; white-space: nowrap; border-radius: 8px; background: #455dff; color: white; padding: 0 12px 1px 10px; font-size: 13px; font-weight: 600; }
+.add-button:hover { background: #344cde; }
+.add-button .icon { width: 16px; height: 16px; stroke-width: 2; }
+#canvas { position: absolute; inset: var(--header) 0 0; overflow: hidden; touch-action: none; outline: 0; user-select: none; background-color: #fff; }
+/* One extra tile covers the viewport at the maximum zoom (20 × 20px). */
+#grid { position: absolute; inset: 0 -400px -400px 0; transform-origin: 0 0; pointer-events: none; background-image: radial-gradient(circle, #e6e7e6 var(--dot, 1px), transparent var(--edge, 1.25px)); background-size: 20px 20px; }
+#world { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0; }
+.note { position: absolute; top: 0; left: 0; width: var(--size); height: var(--size); display: flex; flex-direction: column; align-items: stretch; justify-content: center; padding: calc(var(--size) * .08); background: var(--paper); color: #23231e; box-shadow: 1px 4px 5px -3px #26271729, 2px 10px 15px -6px #37382a42; cursor: grab; outline: 0; }
+.note::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(170deg,#f5dc6021,transparent 33%,#ffffff0a); }
+.note.selected::after { content: ""; position: absolute; pointer-events: none; inset: -7px; border: 1.5px solid #506bff; }
+.note-corners { display: none; position: absolute; inset: -6.25px; z-index: 2; pointer-events: none; }
+.note.selected .note-corners { display: block; }
+.resize-handle {
+  position: absolute; width: 20px; height: 20px; display: grid; place-items: center;
+  pointer-events: auto; touch-action: none; transform: translate(-50%, -50%) scale(var(--handle-scale, 1));
+}
+.resize-handle::after { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #aaa; background: white; }
+.resize-handle:hover::after { border-color: #506bff; }
+[data-corner="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+[data-corner="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+[data-corner="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+[data-corner="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.note.dragging { cursor: grabbing; box-shadow: 3px 10px 16px -4px #39362c40; }
+.note-content, .note-editor { font-family: inherit; font-size: calc(var(--size) * .135); line-height: 1.23; font-weight: 400; letter-spacing: calc(var(--size) * -.0025); text-align: center; white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-content { z-index: 0; max-height: 100%; overflow: hidden; }
+.note-content:empty::before { content: "Ваш текст…"; color: #666251; }
+.note-editor { position: absolute; inset: 0; resize: none; width: 100%; height: 100%; color: inherit; background: transparent; outline: none; border: 0; margin: 0; padding: calc(var(--size) * .08); overflow-y: auto; cursor: text; user-select: text; touch-action: auto; }
+.note.compact .note-content, .note.compact .note-editor { font-size: calc(var(--size) * .09); }
+.note.dense .note-content, .note.dense .note-editor { font-size: calc(var(--size) * .075); }
+.note.long .note-content { overflow-y: auto; scrollbar-width: thin; }
+.note.editing .note-content { visibility: hidden; }
+.tools, .zoom-controls, .help-button, #palette, #help-panel { background: #fff; border: 1px solid #e3e4df; box-shadow: 0 2px 3px #28291e08, 0 4px 14px #25251c0a; }
+.tools { position: fixed; left: 10px; top: clamp(68px, 20vh, 180px); width: 53px; padding: 5px; display: grid; gap: 3px; border-radius: 12px; }
+.tool { border-radius: 7px; width: 41px; height: 41px; display: grid; place-items: center; }
+.tool .icon { width: 23px; height: 23px; }
+.tool:hover, .zoom-controls button:hover, .help-button:hover { background: #f0f0ea; }
+.tool[aria-pressed="true"] { background: #ecece9; color: #22231f; }
+footer { position: fixed; bottom: 17px; left: 20px; right: 21px; display: flex; align-items: flex-end; justify-content: space-between; pointer-events: none; }
+.help-area { display: flex; align-items: center; gap: 14px; }
+.help-button, .zoom-controls, .pan-hint { pointer-events: auto; }
+.help-button { width: 37px; height: 37px; display: grid; place-items: center; border-radius: 50%; }
+.help-button .icon { width: 19px; height: 19px; }
+.pan-hint { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; color: #696c62; font-size: 12px; user-select: none; background: #fff; border: 1px solid #e5e5e1; box-shadow: 0 2px 5px #22222209; border-radius: 11px; padding: 10px 15px; }
+.pan-hint .icon { width: 15px; height: 15px; margin-right: 1px; }
+kbd { font: inherit; font-size: 11px; background: #f7f7f2; border: 1px solid #d1d3c8; border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px 2px; }
+.zoom-controls { display: flex; align-items: center; padding: 4px; border-radius: 10px; }
+.zoom-controls button { height: 30px; min-width: 31px; display: grid; place-items: center; border-radius: 5px; }
+.zoom-controls .icon { width: 17px; height: 17px; }
+.zoom-controls #zoom { width: 60px; height: 30px; padding: 0 2px; border: 0; border-radius: 5px; background: transparent; color: inherit; font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
+#zoom:hover { background: #f0f0ea; }
+#zoom:focus-visible { outline: 2px solid #506bff; outline-offset: -2px; }
+.zoom-controls .divider { width: 1px; height: 17px; background: #d8d9d1; margin: 0 4px; }
+.zoom-controls button:disabled { opacity: .35; }
+.palette-label { display: flex; align-items: center; gap: 8px; padding: 0 9px 0 4px; margin-right: 4px; border-right: 1px solid #e4e5e0; font-size: 13px; color: #50534c; }
+.palette-label .icon { width: 18px; height: 18px; }
+#palette { display: flex; align-items: center; gap: 7px; padding: 9px; border-radius: 11px; position: absolute; z-index: 3; }
+.swatch { padding: 0; width: 23px; height: 23px; border-radius: 50%; border: 1px solid #0002; background: var(--paper); display: grid; place-items: center; }
+.swatch .icon { width: 15px; height: 15px; opacity: 0; }
+.swatch[aria-pressed="true"] .icon { opacity: 1; }
+#remove { border-left: 1px solid #dedfd6; margin-left: 2px; padding: 2px 3px 2px 8px; display: grid; place-items: center; }
+#remove .icon { width: 17px; height: 17px; }
+#help-panel { position: fixed; bottom: 66px; left: 20px; z-index: 5; border-radius: 13px; padding: 20px; width: min(337px, calc(100vw - 32px)); }
+h2 { font-size: 17px; margin: 0 0 15px; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 12px; font-size: 12px; margin: 0; }
+dd { margin: 0; text-align: right; color: #65685e; }
+#placement-tip { position: absolute; bottom: 67px; left: 50%; transform: translateX(-50%); width: max-content; max-width: 95%; background: var(--chrome); color: #fffdf0; border-radius: 7px; padding: 10px 15px; font-size: 13px; pointer-events: none; }
+#canvas.placing, #canvas.placing .note { cursor: crosshair; }
+#canvas.pan-ready, #canvas.pan-ready .note { cursor: grab; }
+#canvas.panning, #canvas.panning .note { cursor: grabbing; }
+@media (max-width: 720px) {
+  .topbar { inset: 7px 7px auto; }
+  .board-panel { gap: 9px; padding: 0 10px; }
+  .tools { left: 7px; } footer { left: 8px; right: 8px; bottom: 8px; }
+  .pan-hint { display: none; }
+  .saved span { display: none; } .actions-panel { gap: 9px; padding-left: 9px; }
+}
+@media (max-width: 430px) {
+  .brand { font-size: 20px; } .brand svg { width: 24px; }
+  .actions-panel .add-button { font-size: 12px; padding: 0 8px; }
+  .tools { width: 44px; padding: 3px; } .tool { width: 36px; height: 38px; }
+}
+
+.note.text-area {
+  --text-size: 28px; --text-font: "Noto Sans", "Segoe UI", sans-serif;
+  width: var(--text-width); height: auto; min-height: var(--text-height, 0px);
+  padding: 0; justify-content: flex-start;
+  color: var(--ink); background: transparent; box-shadow: none;
+}
+.text-area::before { content: none; }
+.text-area.selected::after { content: none; }
+.text-area.editing .note-corners {
+  display: none;
+}
+.text-area .note-corners { inset: 0; }
+.text-area .note-content, .text-area .note-editor {
+  font: var(--text-style, normal) var(--text-weight, 400) var(--text-size)/1.36 var(--text-font);
+  letter-spacing: normal; text-align: var(--text-align, left); text-decoration: var(--text-decoration, none);
+  padding: 0 1px; margin: 0; overflow: hidden; tab-size: 4;
+}
+.text-area .note-content { min-height: 1.36em; max-height: none; }
+.text-area .note-content:empty::before { content: "Введите текст…"; color: #858585; }
+.text-area .note-editor::placeholder { color: #858585; }
+.text-area .resize-handle[data-edge]::after {
+  width: 5px;
+  height: 5px;
+  background: #4968ff;
+  border: 1px solid white;
+}
+[data-edge="w"], [data-edge="e"] { top: 50%; cursor: ew-resize; }
+[data-edge="w"] { left: calc(-17px * var(--handle-scale)); }
+[data-edge="e"] { left: calc(100% + 17px * var(--handle-scale)); }
+[data-edge="n"], [data-edge="s"] { left: 50%; cursor: ns-resize; }
+[data-edge="n"] { top: calc(-17px * var(--handle-scale)); }
+[data-edge="s"] { top: calc(100% + 17px * var(--handle-scale)); }
+#palette, #text-toolbar, #wallet-toolbar, #text-outline, #text-selection { top: 0; left: 0; }
+#text-outline { position: absolute; pointer-events: none; border: 1px solid #506bff; background: #506bff08; }
+#text-selection { position: absolute; z-index: 1; pointer-events: none; border: 1px solid #506bff; }
+#text-selection.editing { opacity: 0.45; }
+#text-toolbar {
+  position: absolute; z-index: 3; display: flex; align-items: center; padding: 0 4px; height: 48px;
+  max-width: calc(100% - 12px); overflow-x: auto; scrollbar-width: none;
+  background: white; color: #242422; border: 1px solid #e9e9e7; border-radius: 14px;
+  box-shadow: 0 2px 10px #20212420; user-select: none;
+}
+#text-toolbar::-webkit-scrollbar { display: none; }
+#text-toolbar select, #text-toolbar input[type="number"] {
+  height: 100%; background: transparent; color: inherit; border: none; border-right: 1px solid #eee;
+  font: inherit; font-size: 15px; flex: none;
+}
+#text-font { width: 111px; padding: 0 8px; cursor: pointer; }
+#text-size { width: 62px; padding: 0 4px 0 12px; }
+.format-group, .ink-control { display: flex; align-items: center; height: 100%; border-right: 1px solid #eee; padding: 0 4px; flex: none; }
+#text-toolbar button, .ink-control span { display: grid; place-items: center; min-width: 39px; height: 36px; border-radius: 5px; font-size: 17px; }
+#text-toolbar button:hover, .ink-control:hover span { background: #f1f1ef; }
+#text-toolbar button[aria-pressed="true"] { background: #ededeb; }
+#text-toolbar .icon { width: 18px; height: 18px; }
+.ink-control { position: relative; }
+.ink-control span { text-decoration: underline 3px var(--ink); text-underline-offset: 3px; }
+.ink-control input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.ink-control:focus-within, #text-toolbar :focus-visible { outline: 2px solid #506bff; outline-offset: -2px; }
+.wallet-card {
+  width: var(--wallet-width); height: var(--wallet-height); padding: 0; display: block; overflow: hidden;
+  border: 1px solid #263b4b; border-radius: 23px; color: #eff5f4; background: #10202b;
+  box-shadow: 0 16px 38px #13243038, 0 3px 8px #111c2520; cursor: grab;
+}
+.wallet-card::before, .wallet-card.selected::after { content: none; }
+.wallet-interactive { cursor: auto; touch-action: auto; }
+.wallet-shell {
+  position: relative; display: flex; flex-direction: column; gap: 12px; width: 100%; height: 100%;
+  padding: 18px; overflow: hidden; border-radius: inherit;
+  background: radial-gradient(ellipse at 100% 0%, #6ac8a224, transparent 44%), linear-gradient(145deg, #142b39, #0d1b25 70%);
+}
+.wallet-header, .wallet-brand, .wallet-summary, .wallet-auto, .wallet-entry-label, .wallet-history-head { display: flex; align-items: center; }
+.wallet-header, .wallet-summary, .wallet-history-head { justify-content: space-between; }
+.wallet-header { min-height: 45px; }
+.wallet-brand { gap: 11px; }
+.wallet-brand-mark { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid #e4ca7e5c; border-radius: 13px; background: linear-gradient(145deg,#e5c97c,#ad8445); color: #24302c; font-size: 22px; box-shadow: inset 0 1px #fff8; }
+.wallet-brand small { display: block; margin-bottom: 3px; color: #91aaa9; font-size: 9px; font-weight: 700; letter-spacing: 1.25px; }
+.wallet-title { margin: 0; color: #f6f4e9; font-size: 18px; font-weight: 650; letter-spacing: -.3px; }
+.wallet-live { display: flex; align-items: center; gap: 6px; color: #96aea8; font-size: 8px; font-weight: 700; letter-spacing: .9px; }
+.wallet-live i { width: 6px; height: 6px; border-radius: 50%; background: #6dcc91; box-shadow: 0 0 10px #6dcc916b; }
+.wallet-summary { min-height: 68px; padding: 12px 14px; border: 1px solid #ffffff12; border-radius: 15px; background: linear-gradient(110deg,#f2d88c1a,#ffffff08); }
+.wallet-summary > div > span { display: block; margin-bottom: 4px; color: #9badaa; font-size: 9px; font-weight: 700; letter-spacing: 1px; }
+.wallet-copper-total { color: #f3d88b; font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -.4px; }
+.wallet-auto { gap: 7px; cursor: pointer; }
+.wallet-auto small { color: #c4cfca; font-size: 10px; white-space: nowrap; }
+.wallet-auto-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.wallet-switch { position: relative; width: 29px; height: 17px; border-radius: 20px; background: #53636a; transition: background .15s; }
+.wallet-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%; background: #eff4ef; transition: transform .15s; }
+.wallet-auto-input:checked + .wallet-switch { background: #63b78a; }
+.wallet-auto-input:checked + .wallet-switch::after { transform: translateX(12px); }
+.wallet-auto-input:focus-visible + .wallet-switch { outline: 2px solid #f2d88b; outline-offset: 2px; }
+.wallet-coins { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.wallet-coin { min-width: 0; padding: 9px 8px 8px; border: 1px solid #ffffff12; border-radius: 13px; background: #ffffff08; }
+.wallet-coin-mark { display: grid; place-items: center; width: 23px; height: 23px; margin-bottom: 7px; border-radius: 8px; color: #14242c; font-size: 11px; font-weight: 800; }
+.wallet-coin.platinum .wallet-coin-mark { background: linear-gradient(145deg,#d8e7e7,#839da4); }
+.wallet-coin.gold .wallet-coin-mark { background: linear-gradient(145deg,#ffe6a1,#c99d45); }
+.wallet-coin.silver .wallet-coin-mark { background: linear-gradient(145deg,#eef2ed,#9aaca8); }
+.wallet-coin.copper .wallet-coin-mark { background: linear-gradient(145deg,#efbd8d,#ad6846); }
+.wallet-coin-name { display: block; overflow: hidden; color: #91a7a7; font-size: 8px; font-weight: 700; letter-spacing: .55px; text-overflow: ellipsis; white-space: nowrap; }
+.wallet-coin strong { display: block; overflow: hidden; margin-top: 3px; color: #f4f3e8; font-size: 16px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
+.wallet-rates { flex: none; padding: 8px 10px; border: 1px solid #ffffff12; border-radius: 12px; background: #08151c55; }
+.wallet-rates summary { display: flex; align-items: center; justify-content: space-between; color: #d7e1dd; cursor: pointer; font-size: 11px; font-weight: 650; list-style: none; }
+.wallet-rates summary::-webkit-details-marker { display: none; }
+.wallet-rates summary::after { content: "⌄"; margin-left: 8px; color: #92aaa5; }
+.wallet-rates[open] summary { margin-bottom: 8px; }
+.wallet-rates summary small { margin-left: auto; color: #819894; font-size: 9px; font-weight: 400; }
+.wallet-rate-head, .wallet-rate-row { display: grid; grid-template-columns: minmax(70px,1fr) 78px 78px; gap: 7px; align-items: center; }
+.wallet-rate-head { padding: 0 4px 4px; color: #819894; font-size: 8px; text-align: center; }
+.wallet-rate-head span:first-child { text-align: left; }
+.wallet-rate-row { padding: 3px 0; color: #e7eeea; font-size: 10px; }
+.wallet-rate-row > span { font-weight: 650; }
+.wallet-rate-row input, .wallet-entry input, .wallet-entry select {
+  min-width: 0; height: 29px; border: 1px solid #ffffff1b; border-radius: 8px; outline: none;
+  background: #ffffff0b; color: #f3f4eb; font: inherit; font-size: 11px;
+}
+.wallet-rate-row input { width: 100%; padding: 0 7px; text-align: right; font-variant-numeric: tabular-nums; }
+.wallet-rate-row input:focus, .wallet-entry input:focus, .wallet-entry select:focus { border-color: #d9bf78; box-shadow: 0 0 0 2px #d9bf7824; }
+.wallet-rate-hint { display: block; margin-top: 5px; color: #819894; font-size: 8px; }
+.wallet-entry { flex: none; padding: 10px; border: 1px solid #ffffff12; border-radius: 13px; background: #ffffff08; }
+.wallet-entry-label { justify-content: space-between; margin-bottom: 8px; color: #dce5df; font-size: 10px; font-weight: 700; }
+.wallet-entry-label small, .wallet-history-head small { color: #819894; font-size: 9px; font-weight: 400; }
+.wallet-entry-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 56px; gap: 6px; }
+.wallet-entry input, .wallet-entry select { width: 100%; padding: 0 8px; }
+.wallet-entry select { cursor: pointer; }
+.wallet-entry select option { background: #162a34; color: #f3f4eb; }
+.wallet-entry .description-row { grid-template-columns: minmax(0,1fr) 98px; margin-top: 6px; }
+.wallet-entry .description-row input { font-size: 10px; }
+.wallet-entry button { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 29px; padding: 0 8px; border-radius: 8px; background: #d8bf7d; color: #1d2a2c; font-size: 10px; font-weight: 750; }
+.wallet-entry button:hover { background: #ecd597; }
+.wallet-entry button span { font-size: 15px; line-height: 1; }
+.wallet-history { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.wallet-history-head { flex: none; padding: 1px 2px 6px; color: #e1e8e1; font-size: 10px; font-weight: 700; }
+.wallet-transactions { min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #71858055 transparent; }
+.wallet-transaction { display: grid; grid-template-columns: minmax(0,1fr) auto 22px; gap: 8px; align-items: center; min-height: 39px; padding: 5px 4px; border-top: 1px solid #ffffff0c; }
+.wallet-transaction-copy { min-width: 0; }
+.wallet-transaction-copy strong, .wallet-transaction-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wallet-transaction-copy strong { color: #e4ebe4; font-size: 10px; font-weight: 550; }
+.wallet-transaction-copy span { margin-top: 3px; color: #829894; font-size: 9px; }
+.wallet-transaction > b { color: #ff9d91; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wallet-transaction.income > b { color: #8cdbad; }
+.wallet-transaction > button { width: 22px; height: 22px; border-radius: 6px; color: #839995; font-size: 16px; line-height: 1; }
+.wallet-transaction > button:hover { background: #ffffff12; color: #fff; }
+.wallet-empty { padding: 16px 6px; color: #829894; font-size: 10px; text-align: center; }
+.wallet-history-note { flex: none; padding-top: 5px; color: #819894; font-size: 9px; }
+#wallet-toolbar { position: absolute; z-index: 3; display: flex; align-items: center; gap: 8px; height: 48px; padding: 4px 8px 4px 13px; border: 1px solid #e9e9e7; border-radius: 14px; background: white; color: #242422; box-shadow: 0 2px 10px #20212420; user-select: none; }
+.wallet-toolbar-label { padding-right: 8px; border-right: 1px solid #eee; color: #55584f; font-size: 12px; font-weight: 600; }
+#wallet-toolbar button { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 7px; }
+#wallet-toolbar button:hover { background: #f1f1ef; }
+#wallet-toolbar .icon { width: 18px; height: 18px; }
+#wallet-toolbar #remove-wallet { color: #a4473c; }
+#canvas.placing-wallet, #canvas.placing-wallet .note { cursor: crosshair; }
+#canvas.placing-text, #canvas.placing-text .note { cursor: text; }
+
+.wallet-card { overflow: visible; transform-origin: 0 0; }
+.wallet-card .resize-handle { transform: translate(-50%, -50%) scale(calc(var(--handle-scale, 1) * var(--wallet-inverse, 1))); }
+.wallet-multi-head, .wallet-multi-row { display:grid; grid-template-columns: 56px repeat(4,minmax(0,1fr)); gap:5px; align-items:center; font-size:10px; }
+.wallet-multi-head { text-align:center; color:#b6c8c2; margin-bottom:5px; }
+.wallet-multi-row { margin-bottom:6px; }
+.wallet-multi-row input { padding:0 5px; }
+.wallet-transaction > b { max-width:155px; white-space:normal; text-align:right; line-height:1.5; }
+.wallet-palette { border:1px solid #ffffff30; border-radius:8px; background:#203641; color:#eef4ed; padding:6px; font:inherit; font-size:10px; }
+.wallet-card[data-palette="ocean"] .wallet-shell { background:radial-gradient(ellipse at 100% 0%,#6db8ef30,transparent 45%),linear-gradient(145deg,#193e66,#101e35); }
+.wallet-card[data-palette="plum"] .wallet-shell { background:radial-gradient(ellipse at 100% 0%,#d389b530,transparent 45%),linear-gradient(145deg,#49304f,#241b32); }
+.wallet-shell { overflow:auto; }
+.wallet-history { min-height:90px; }
+.wallet-card input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+.wallet-card input[type="number"]::-webkit-inner-spin-button,
+.wallet-card input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.wallet-card .wallet-shell { background: linear-gradient(145deg, color-mix(in srgb, var(--wallet-color, #285c50) 75%, #101820), color-mix(in srgb, var(--wallet-color, #285c50) 25%, #0d1420)); }
+#wallet-appearance { position: relative; }
+#wallet-appearance summary { display:grid; place-items:center; width:36px; height:36px; border-radius:7px; cursor:pointer; list-style:none; color:#536c63; font-size:23px; }
+#wallet-appearance summary::-webkit-details-marker { display:none; }
+#wallet-appearance summary:hover, #wallet-appearance[open] summary { background:#eef2ee; }
+.wallet-appearance-menu { position:absolute; top:44px; right:0; display:flex; align-items:center; gap:14px; width:210px; padding:14px; border:1px solid #e3e6e1; border-radius:12px; background:white; box-shadow:0 6px 24px #19251c22; font-size:12px; }
+#wallet-color { width:46px; height:32px; border:0; padding:2px; background:transparent; cursor:pointer; }
+.note.locked { cursor: default; }
+.note.locked:not(.wallet-card):not(.rpg-card) > * { pointer-events: none; }
+.note.locked .note-corners { display: none !important; }
+.lock-element { display: grid; place-items: center; min-width: 34px; height: 34px; border-radius: 7px; }
+.lock-element .icon { width: 18px; height: 18px; }
+.lock-element:hover { background: #eef0ed; }
+.lock-element[aria-pressed="true"] { background: #e8edf9; color: #455dff; }
+#palette > [inert], #text-toolbar > [inert], #wallet-toolbar > [inert] { opacity: .4; }
+.note.image-card { width:var(--wallet-width); height:var(--wallet-height); padding:0; background:transparent; box-shadow:none; transform-origin:0 0; }
+.image-card::before, .image-card.selected::after { content:none; }
+.image-card > img { display:block; width:100%; height:100%; object-fit:contain; user-select:none; pointer-events:none; }
+.image-card .note-corners { inset:0; }
+.image-card .resize-handle { transform:translate(-50%,-50%) scale(calc(var(--handle-scale,1) * var(--wallet-inverse,1))); }
+.layer-element { display:grid; place-items:center; flex-shrink:0; width:34px; height:34px; border-radius:7px; }
+.layer-element .icon { width:19px; height:19px; }
+.layer-element:hover { background:#eef0ed; }
+#palette { max-width:calc(100% - 12px); overflow-x:auto; }
+#palette > * { flex-shrink:0; }
+#group-box, #selection-marquee { position:absolute; top:0; left:0; border:1px solid #506bff; pointer-events:none; z-index:2; }
+#selection-marquee { background:#506bff14; }
+.group-handle { position:absolute; width:10px; height:10px; border:1px solid #506bff; background:white; border-radius:50%; transform:translate(-50%,-50%); pointer-events:auto; touch-action:none; }
+.group-handle.nw { top:0; left:0; cursor:nwse-resize; }
+.group-handle.ne { top:0; left:100%; cursor:nesw-resize; }
+.group-handle.sw { top:100%; left:0; cursor:nesw-resize; }
+.group-handle.se { top:100%; left:100%; cursor:nwse-resize; }
+.group-locked .group-handle { display:none; }
+#group-toolbar { position:absolute; top:0; left:0; z-index:4; display:flex; gap:4px; max-width:calc(100% - 12px); overflow:auto; padding:5px; border:1px solid #e3e4df; border-radius:10px; background:white; box-shadow:0 3px 14px #0001; }
+#group-toolbar button { flex-shrink:0; padding:7px 9px; border-radius:6px; font-size:11px; }
+#group-toolbar button:hover { background:#eef0ed; }
+#group-toolbar button:disabled { opacity:.4; cursor:default; }
+.multi-selection .note.selected .note-corners { display:none; }
+.multi-selection .note.selected::after { content:none; }
+#backup-menu { position:relative; font-size:12px; }
+#backup-menu summary { cursor:pointer; padding:9px 10px; border-radius:7px; list-style:none; background:#f1f2ed; font-weight:600; }
+#backup-menu summary::-webkit-details-marker { display:none; }
+#backup-menu[open] summary { background:#e5e9df; }
+.backup-panel { position:absolute; top:44px; right:0; width:min(320px,calc(100vw - 24px)); padding:18px; border:1px solid #e1e4dc; border-radius:12px; background:#fff; box-shadow:0 8px 30px #20281c25; }
+.backup-panel strong { font-size:15px; }
+.backup-panel p { font-size:12px; line-height:1.6; color:#62685c; margin:10px 0; }
+.backup-panel button { display:block; width:100%; text-align:left; padding:11px 12px; border-radius:7px; background:#f0f2ec; margin:7px 0; font-size:13px; }
+.backup-panel button:hover { background:#e5e9dd; }
+.backup-panel button:disabled { opacity:.5; cursor:wait; }
+.backup-panel small { display:block; margin-top:12px; font-size:11px; line-height:1.5; color:#787c73; }
+#backup-status:empty { display:none; }
+  </style>
+  <link rel="stylesheet" href="rpg.css">
+</head>
+<body>
+  <svg class="symbol-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <symbol id="i-pointer" viewBox="0 0 24 24"><path d="m5 3 14 10-7 1-3.5 6z" fill="currentColor" stroke-linejoin="round"/></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24"><path d="M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v9l-6 6H5a1 1 0 0 1-1-1z"/><path d="M14 20v-5a1 1 0 0 1 1-1h5"/></symbol>
+      <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M4 6.5h15a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h13"/><path d="M21 10h-5a2.5 2.5 0 0 0 0 5h5M16 12.5h.01"/></symbol>
+      <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 8V4h16v4M12 4v16m-4 0h8"/></symbol>
+      <symbol id="i-left" viewBox="0 0 24 24"><path d="M4 5h16M4 10h9M4 15h16M4 20h9"/></symbol>
+      <symbol id="i-center" viewBox="0 0 24 24"><path d="M4 5h16M8 10h8M4 15h16M8 20h8"/></symbol>
+      <symbol id="i-right" viewBox="0 0 24 24"><path d="M4 5h16M11 10h9M4 15h16M11 20h9"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+      <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+      <symbol id="i-workspace" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.4"/><rect x="14" y="3.5" width="6.5" height="7" rx="1.4"/><rect x="3.5" y="14" width="7" height="6.5" rx="1.4"/><rect x="14" y="14" width="6.5" height="6.5" rx="1.4"/></symbol>
+      <symbol id="i-hand" viewBox="0 0 24 24"><path d="M7.5 13V6.5a1.5 1.5 0 0 1 3 0v5.2-7.2a1.5 1.5 0 0 1 3 0v7-5.2a1.5 1.5 0 0 1 3 0v6-3.7a1.5 1.5 0 0 1 3 0v6.2c0 4.1-2.7 6.7-6.4 6.7-2.8 0-4.4-1.1-6.2-3.4l-3.5-5a1.6 1.6 0 0 1 2.4-2z"/></symbol>
+      <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 0 1 1-1h4m6 0h4a1 1 0 0 1 1 1v4m0 6v4a1 1 0 0 1-1 1h-4m-6 0H5a1 1 0 0 1-1-1v-4"/></symbol>
+      <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.1c0-3.2 6.1-3.3 5.2.3-.5 1.6-2.8 1.8-2.8 4.2"/><circle cx="12" cy="16.8" r=".85" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m4.5 12 5 5L20 6.5"/></symbol>
+      <symbol id="i-bin" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 10v7m4-7v7"/></symbol>
+      <symbol id="i-stack" viewBox="0 0 24 24"><rect x="8" y="3" width="13" height="14" rx="2"/><path d="M5 7H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1"/></symbol>
+    </defs>
+  </svg>
+  <header class="topbar">
+    <div class="board-panel">
+    <div class="brand">
+      <svg viewBox="0 0 36 36" aria-hidden="true"><path d="m5 8 22-4 4 23-22 4z" fill="#a99d65"/><path d="M3 6h25v17l-8 8H3z" fill="#f6d866"/><path d="m20 31 .5-8.5L28 23z" fill="#fff0ac"/></svg>
+      <span>Huiro</span>
+    </div>
+    </div>
+    <div class="actions-panel">
+    <span class="saved" id="saved" role="status"><i></i><span>Сохранено локально</span></span>
+    <details id="backup-menu">
+      <summary title="Резервная копия доски">Бекап</summary>
+      <div class="backup-panel">
+        <strong>Резервная копия</strong>
+        <p>Вся доска и оригиналы картинок в одном файле. Храните его вне браузера — на компьютере или в облаке.</p>
+        <button id="backup-download" type="button">↓ Скачать копию</button>
+        <button id="backup-restore" type="button">↑ Восстановить из файла</button>
+        <input id="backup-file" type="file" accept=".listok" hidden>
+        <small>Восстановление заменит текущую доску. Копию нужно скачать до очистки данных браузера.</small>
+        <p id="backup-status" role="status" aria-live="polite"></p>
+      </div>
+    </details>
+    </div>
+  </header>
+  <main id="canvas" aria-label="Интерактивная доска" tabindex="-1">
+    <div id="grid" aria-hidden="true"></div>
+    <div id="world">
+      <div id="notes" aria-label="Стикеры, текстовые области и кошельки"></div>
+    </div>
+    <div id="text-selection" aria-hidden="true" hidden></div>
+    <div id="text-outline" aria-hidden="true" hidden></div>
+    <div id="text-toolbar" role="toolbar" aria-label="Настройки текстовой области" hidden>
+      <select id="text-font" aria-label="Шрифт" title="Шрифт">
+        <option>Noto Sans</option><option>Arial</option><option>Georgia</option><option>Courier New</option>
+      </select>
+      <input id="text-size" type="number" min="1" aria-label="Размер шрифта" title="Размер шрифта">
+      <div class="format-group">
+        <button data-style="bold" title="Полужирный" aria-label="Полужирный" aria-pressed="false"><b>B</b></button>
+        <button data-style="italic" title="Курсив" aria-label="Курсив" aria-pressed="false"><i>I</i></button>
+        <button data-style="underline" title="Подчёркивание" aria-label="Подчёркивание" aria-pressed="false"><u>U</u></button>
+      </div>
+      <div class="format-group" aria-label="Выравнивание" role="group">
+        <button data-align="left" title="По левому краю" aria-label="По левому краю" aria-pressed="false"><svg class="icon"><use href="#i-left"/></svg></button>
+        <button data-align="center" title="По центру" aria-label="По центру" aria-pressed="false"><svg class="icon"><use href="#i-center"/></svg></button>
+        <button data-align="right" title="По правому краю" aria-label="По правому краю" aria-pressed="false"><svg class="icon"><use href="#i-right"/></svg></button>
+      </div>
+      <label class="ink-control" title="Цвет текста"><span aria-hidden="true">A</span><input id="text-ink" type="color" aria-label="Цвет текста"></label>
+      <button id="remove-text" title="Удалить текстовую область" aria-label="Удалить текстовую область"><svg class="icon"><use href="#i-bin"/></svg></button>
+    </div>
+    <div id="wallet-toolbar" role="toolbar" aria-label="Действия с кошельком" hidden>
+      <span class="wallet-toolbar-label">Кошелёк</span>
+      <details id="wallet-appearance">
+        <summary title="Оформление кошелька" aria-label="Оформление кошелька"><span aria-hidden="true">◉</span></summary>
+        <div class="wallet-appearance-menu"><label for="wallet-color">Цвет кошелька</label><input id="wallet-color" type="color" value="#285c50" aria-label="Цвет кошелька"></div>
+      </details>
+      <button id="remove-wallet" title="Удалить кошелёк" aria-label="Удалить кошелёк"><svg class="icon"><use href="#i-bin"/></svg></button>
+    </div>
+    <div id="placement-tip" hidden>Нажмите на холст, чтобы добавить стикер</div>
+    <div id="palette" role="toolbar" aria-label="Настройки стикера" hidden><span class="palette-label"><svg class="icon"><use href="#i-note"/></svg>Цвет</span></div>
+  </main>
+  <aside class="tools" aria-label="Инструменты">
+    <input id="image-file" type="file" accept="image/*" multiple hidden>
+    <button id="select-tool" class="tool" aria-label="Выбор (V)" title="Выбор (V)" aria-pressed="true"><svg class="icon"><use href="#i-pointer"/></svg></button>
+    <button id="image-tool" class="tool" aria-label="Добавить изображение" title="Добавить изображение или вставить Ctrl+V"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m3 18 6-6 4 4 4-6 4 5"/></svg></button>
+    <button id="note-tool" class="tool" aria-label="Стикер (N)" title="Стикер (N)" aria-pressed="false"><svg class="icon"><use href="#i-note"/></svg></button>
+    <button id="text-tool" class="tool" aria-label="Текстовая область (T)" title="Текстовая область (T)" aria-pressed="false"><svg class="icon"><use href="#i-text"/></svg></button>
+    <button id="rpg-tool" class="tool" aria-label="Лист персонажа" title="Навыки, зелья и ресурсы" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 2 9 6v8l-9 6-9-6V8Z M12 2v20 M3 8l18 8 M21 8 3 16"/></svg></button>
+    <button id="wallet-tool" class="tool" aria-label="Кошелёк (W)" title="Кошелёк (W)" aria-pressed="false"><svg class="icon"><use href="#i-wallet"/></svg></button>
+  </aside>
+  <footer>
+    <div class="help-area">
+      <button id="help" class="help-button" title="Подсказки" aria-label="Подсказки" aria-expanded="false" aria-controls="help-panel"><svg class="icon"><use href="#i-help"/></svg></button>
+      <div class="pan-hint"><svg class="icon"><use href="#i-hand"/></svg><kbd>Пробел</kbd> + перетаскивание</div>
+    </div>
+    <div class="zoom-controls" role="group" aria-label="Масштаб">
+      <button id="minus" aria-label="Уменьшить масштаб" title="Уменьшить масштаб"><svg class="icon"><use href="#i-minus"/></svg></button>
+      <input id="zoom" type="text" inputmode="decimal" value="100%" aria-label="Масштаб в процентах, от 1 до 2000" title="Введите масштаб от 1% до 2000%. Двойной щелчок — 100%">
+      <button id="plus" aria-label="Увеличить масштаб" title="Увеличить масштаб"><svg class="icon"><use href="#i-plus"/></svg></button>
+      <span class="divider"></span>
+      <button id="fit" aria-label="Показать всю доску" title="Показать всю доску"><svg class="icon"><use href="#i-fit"/></svg></button>
+    </div>
+  </footer>
+  <section id="help-panel" hidden>
+    <h2>Управление доской</h2>
+    <dl>
+      <dt>Выбор</dt><dd><kbd>V</kbd></dd>
+      <dt>Несколько элементов</dt><dd><kbd>Shift</kbd> + клик или рамка</dd>
+      <dt>Сгруппировать</dt><dd><kbd>Ctrl</kbd> + <kbd>G</kbd></dd>
+      <dt>Разгруппировать</dt><dd><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></dd>
+      <dt>Новый стикер</dt><dd><kbd>N</kbd> и клик</dd>
+      <dt>Текстовая область</dt><dd><kbd>T</kbd> и клик или протяжка</dd>
+      <dt>Кошелёк</dt><dd><kbd>W</kbd> и клик</dd>
+      <dt>Изменить размер</dt><dd>Потянуть за угол рамки</dd>
+      <dt>Изменить цвет</dt><dd>Клик по стикеру</dd>
+      <dt>Ввести текст</dt><dd>Двойной клик</dd>
+      <dt>Масштаб</dt><dd>Колесо мыши</dd>
+      <dt>Двигать холст</dt><dd>Правая кнопка и движение</dd>
+      <dt>Удалить выбранное</dt><dd><kbd>Delete</kbd></dd>
+    </dl>
+  </section>
+  <script src="backup.js"></script>
+  <script src="rpg.js"></script>
+  <script>
+(() => {
+  "use strict";
+
+  const $ = id => document.getElementById(id);
+  const canvas = $("canvas");
+  const world = $("world");
+  const palette = $("palette");
+  const saved = $("saved");
+  const textToolbar = $("text-toolbar");
+  const walletToolbar = $("wallet-toolbar");
+  const textSelection = $("text-selection");
+  const textOutline = $("text-outline");
+  const textFonts = Array.from($("text-font").options, option => option.value);
+  const defaultTextWidth = 300;
+  const defaultTextSize = 28;
+  const minTextWidth = 48;
+  const isText = item => item?.type === "text";
+  const isWallet = item => item?.type === "wallet";
+  const isImage = item => item?.type === "image";
+  const isRpg = item => item?.type === "rpg";
+  const isScalable = item => isWallet(item) || isImage(item) || isRpg(item);
+  const walletWidth = 440;
+  const walletHeight = 640;
+  const coinLabel = code => ({ P: "П", G: "З", S: "С", C: "М" })[code];
+  const walletCurrencies = [
+    { code: "P", name: "Платина", label: "ПЛАТИНА", color: "platinum" },
+    { code: "G", name: "Золото", label: "ЗОЛОТО", color: "gold" },
+    { code: "S", name: "Серебро", label: "СЕРЕБРО", color: "silver" },
+    { code: "C", name: "Медь", label: "МЕДЬ", color: "copper" }
+  ];
+  const defaultWalletRates = {
+    buy: { P: 100, G: 100, S: 50 },
+    sell: { P: 80, G: 90, S: 40 }
+  };
+  const storageKey = "listok.board.v1";
+  const papers = {
+    yellow: ["#fff7a6", "Жёлтый"],
+    lilac: ["#d8c6ec", "Сиреневый"],
+    mint: ["#c6dfbc", "Мятный"],
+    peach: ["#f1c4a5", "Персиковый"],
+    blue: ["#bfd9e9", "Голубой"],
+    pink: ["#edc4d0", "Розовый"]
+  };
+
+  const defaultSize = 200;
+  const minSize = 64;
+  const minZoom = 0.01;
+  const maxZoom = 20;
+  const percentFormat = new Intl.NumberFormat("ru-RU", { useGrouping: false, maximumFractionDigits: 0 });  const examples = [
+    { id: "places", x: 0, y: 0, tilt: 0, color: "yellow", text: "Собрать карту любимых мест" },
+    { id: "path", x: 222, y: 0, tilt: 0, color: "yellow", text: "Набросать первый маршрут по городу" },
+    { id: "friends", x: 444, y: 0, tilt: 0, color: "yellow", text: "Спросить друзей про их тайные места" }
+  ];
+  const icon = name => '<svg class="icon" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
+  const limit = (value, min, max) => Math.min(max, Math.max(min, value));
+  const noteElements = new Map();
+  let notes = examples.map(note => ({ ...note, size: defaultSize }));
+  let camera = { x: 0, y: 0, scale: 1 };
+  let selected = null;
+  let selection = new Set();
+  let editor = null;
+  let tool = "select";
+  let gesture = null;
+  let spaceHeld = false;
+  let preferredColor = "yellow";
+  let saveTimer;
+  let restoringBackup = false;
+  const grid = $("grid");
+  const zoomInput = $("zoom");
+  let viewport = canvas.getBoundingClientRect();
+  let frameId = null;
+  let pendingMove = null;
+  let cameraDirty = false;
+  let paintedScale = 0;
+  let gridStep = 20;
+  let gridScale = 1;
+  let paletteMetrics = null;
+  let zoomEdited = false;
+
+  function fit(initial = false) {
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const note of notes) {
+      if (isScalable(note)) {
+        left = Math.min(left, note.x - 10);
+        top = Math.min(top, note.y - 10);
+        right = Math.max(right, note.x + note.width * note.scale + 10);
+        bottom = Math.max(bottom, note.y + note.height * note.scale + 10);
+        continue;
+      }
+      if (isText(note)) {
+        left = Math.min(left, note.x);
+        top = Math.min(top, note.y);
+        right = Math.max(right, note.x + note.width);
+        bottom = Math.max(bottom, note.y + noteElements.get(note.id).offsetHeight);
+        continue;
+      }
+      const angle = note.tilt * Math.PI / 180;
+      const overhang = note.size * (Math.abs(Math.cos(angle)) + Math.abs(Math.sin(angle)) - 1) / 2;
+      left = Math.min(left, note.x - overhang - 9);
+      top = Math.min(top, note.y - overhang - 14);
+      right = Math.max(right, note.x + note.size + overhang + 10);
+      bottom = Math.max(bottom, note.y + note.size + overhang + 10);
+    }
+    if (!notes.length) { left = top = 0; right = bottom = 200; }
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    const marginLeft = width < 720 ? 60 : 95;
+    const freeWidth = Math.max(100, width - marginLeft - 30);
+    const freeHeight = Math.max(100, height - 95);
+    let scale = limit(Math.min(freeWidth / (right-left), freeHeight / (bottom-top)), minZoom, 1);
+    if (initial && width < 600) scale = Math.max(.8, scale);
+    camera = {
+      scale,
+      x: marginLeft + Math.max(0, (freeWidth - (right-left) * scale) / 2) - left * scale,
+      y: 30 + (freeHeight - (bottom-top) * scale) / 2 - top * scale
+    };
+    if (initial) {
+      // Leave breathing room to the left of the opening row on wide screens.
+      const spareWidth = Math.max(0, freeWidth - (right - left) * scale);
+      camera.x += Math.min(width * .12, spareWidth / 2);
+      camera.y = height / 2 - (top + bottom) * scale / 2;
+    }
+    drawCamera();
+  }
+
+  function validWalletTransaction(tx) {
+    return tx && typeof tx.id === "string" && ["income", "expense"].includes(tx.type) &&
+      (tx.amounts ? walletCurrencies.every(c => Number.isFinite(tx.amounts[c.code]) && tx.amounts[c.code] >= 0) && Object.values(tx.amounts).some(v => v > 0) : Number.isFinite(tx.amount) && tx.amount > 0 && walletCurrencies.some(currency => currency.code === tx.currency)) &&
+      typeof tx.description === "string" && Number.isFinite(tx.at);
+  }
+  function normalizeWallet(note) {
+    const rates = { buy: { ...defaultWalletRates.buy }, sell: { ...defaultWalletRates.sell } };
+    for (const side of ["buy", "sell"]) {
+      for (const currency of ["P", "G", "S"]) {
+        const value = note.rates?.[side]?.[currency];
+        if (Number.isFinite(value) && value > 0) rates[side][currency] = value;
+      }
+    }
+    return {
+      ...note,
+      scale: Number.isFinite(note.scale) ? limit(note.scale, .35, 3) : 1,
+      palette: ["forest", "ocean", "plum"].includes(note.palette) ? note.palette : "forest",
+      color: /^#[0-9a-f]{6}$/i.test(note.color) ? note.color : ({ ocean: "#285f99", plum: "#754c80" }[note.palette] || "#285c50"),
+      title: typeof note.title === "string" ? note.title.slice(0, 48) : "Кошелёк",
+      width: Number.isFinite(note.width) ? limit(note.width, 360, 760) : walletWidth,
+      height: Number.isFinite(note.height) ? limit(note.height, 420, 900) : walletHeight,
+      rates,
+      autoConvert: note.autoConvert !== false,
+      transactions: Array.isArray(note.transactions) ? note.transactions.filter(validWalletTransaction) : []
+    };
+  }
+  function validNote(note) {
+    if (!note || typeof note.id !== "string" || ![note.x, note.y, note.tilt].every(Number.isFinite)) return false;
+    if (isImage(note)) return typeof note.assetId === "string" && Number.isFinite(note.width) && note.width > 0 && Number.isFinite(note.height) && note.height > 0;
+    if (isRpg(note)) return !!note.tracker;
+    if (isWallet(note)) return Number.isFinite(note.width) && Number.isFinite(note.height);
+    return typeof note.text === "string" &&
+      (isText(note) ? Number.isFinite(note.width) && note.width >= minTextWidth : Object.hasOwn(papers, note.color));
+  }
+  function restore() {
+    try {
+      const data = JSON.parse(localStorage.getItem(storageKey));
+      if (!data || data.version !== 1 || !Array.isArray(data.notes) || !data.notes.every(validNote)) return false;
+      if (new Set(data.notes.map(n => n.id)).size !== data.notes.length) return false;
+      notes = data.notes.map(note => {
+        if (isImage(note)) return { ...note, scale: Number.isFinite(note.scale) ? limit(note.scale, .05, 10) : 1 };
+        if (isRpg(note)) return { ...note, width: 1080, height: 860, scale: Number.isFinite(note.scale) ? limit(note.scale, .35, 3) : 1, tracker: RpgTracker.normalize(note.tracker) };
+        if (isWallet(note)) return normalizeWallet(note);
+        if (!isText(note)) return { ...note, size: Number.isFinite(note.size) ? Math.max(minSize, note.size) : defaultSize };
+        return {
+          ...note, tilt: 0,
+          height: Number.isFinite(note.height) ? Math.max(0, note.height) : 0,
+          fontSize: Number.isFinite(note.fontSize) ? Math.max(1, note.fontSize) : defaultTextSize,
+          font: textFonts.includes(note.font) ? note.font : textFonts[0],
+          ink: /^#[0-9a-f]{6}$/i.test(note.ink) ? note.ink : "#1c1c1c",
+          align: ["left", "center", "right"].includes(note.align) ? note.align : "left"
+        };
+      });
+      if (Object.hasOwn(papers, data.preferredColor)) preferredColor = data.preferredColor;
+      const c = data.camera;
+      if (c && [c.x, c.y, c.scale].every(Number.isFinite) && c.scale >= minZoom && c.scale <= maxZoom &&
+          Math.abs(data.width - canvas.clientWidth) < 100 && Math.abs(data.height - canvas.clientHeight) < 120) {
+        camera = c;
+        return true;
+      }
+    } catch { /* A restricted browser can still use the board in memory. */ }
+    return false;
+  }
+  function save() {
+    if (restoringBackup) return;
+    clearTimeout(saveTimer);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ version: 1, notes, camera, preferredColor, width: canvas.clientWidth, height: canvas.clientHeight }));
+      saved.classList.remove("unsaved");
+      saved.lastElementChild.textContent = "Сохранено локально";
+    } catch {
+      saved.classList.add("unsaved");
+      saved.lastElementChild.textContent = "Сохранение недоступно";
+    }
+    saved.title = saved.lastElementChild.textContent;
+  }
+  function saveSoon() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, 160);
+  }
+  function localPoint(x, y) {
+    return { x: (x - viewport.left - camera.x) / camera.scale, y: (y - viewport.top - camera.y) / camera.scale };
+  }
+  function translate(x, y) {
+    return `translate3d(${x}px, ${y}px, 0)`;
+  }
+  function moveNote(note, el) {
+    el.style.transform = translate(note.x, note.y) + (isScalable(note) ? " scale(" + note.scale + ")" : " rotate(var(--tilt, 0deg))");
+    if (isScalable(note)) el.style.setProperty("--wallet-inverse", 1 / note.scale);
+  }
+  function drawTextSelection() {
+    drawGroupSelection();
+    if (selection.size > 1) { textSelection.hidden = true; return; }
+    if (!selected || (!isText(selected) && !isScalable(selected))) {
+      textSelection.hidden = true;
+      return;
+    }
+    const bounds = noteElements.get(selected.id).getBoundingClientRect();
+    textSelection.hidden = false;
+    textSelection.classList.toggle("editing", isText(selected) && !!editor && editor.note === selected);
+    textSelection.style.transform = translate(bounds.left - viewport.left, bounds.top - viewport.top);
+    textSelection.style.width = bounds.width + "px";
+    textSelection.style.height = bounds.height + "px";
+  }
+  function positionNote(note, el) {
+    if (isText(note)) {
+      el.style.setProperty("--text-width", note.width + "px");
+      el.style.setProperty("--text-height", note.height + "px");
+    } else if (isScalable(note)) {
+      el.style.setProperty("--wallet-width", note.width + "px");
+      el.style.setProperty("--wallet-height", note.height + "px");
+    } else {
+      el.style.setProperty("--size", note.size + "px");
+    }
+    moveNote(note, el);
+  }
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+  }
+  function walletBalances(wallet) {
+    const balances = { P: 0, G: 0, S: 0, C: 0 };
+    for (const transaction of wallet.transactions) {
+      for (const currency of walletCurrencies) {
+        const amount = transaction.amounts ? transaction.amounts[currency.code] : transaction.currency === currency.code ? transaction.amount : 0;
+        balances[currency.code] += (transaction.type === "income" ? 1 : -1) * amount;
+      }
+    }
+    if (wallet.autoConvert) {
+      const convert = (from, to, rate) => {
+        if (balances[to] >= 0) return;
+        const coins = Math.ceil(-balances[to] / rate - 1e-9);
+        balances[from] -= coins;
+        balances[to] += coins * rate;
+      };
+      convert("S", "C", wallet.rates.sell.S);
+      convert("G", "S", wallet.rates.sell.G);
+      convert("P", "G", wallet.rates.sell.P);
+    }
+    return balances;
+  }
+  function formatWalletAmount(amount) {
+    return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(amount);
+  }
+  function walletCopperTotal(wallet, balances) {
+    const rates = wallet.rates.sell;
+    return balances.P * rates.P * rates.G * rates.S + balances.G * rates.G * rates.S + balances.S * rates.S + balances.C;
+  }
+  function updateWalletView(wallet, el) {
+    const balances = walletBalances(wallet);
+    const rates = wallet.rates;
+    el.style.setProperty("--wallet-color", wallet.color);
+    el.querySelector(".wallet-title").textContent = wallet.title;
+    el.querySelector(".wallet-copper-total").textContent = formatWalletAmount(walletCopperTotal(wallet, balances)) + " м.";
+    el.querySelector(".wallet-auto-input").checked = wallet.autoConvert;
+    el.querySelector(".wallet-coins").innerHTML = walletCurrencies.map(currency => `
+      <div class="wallet-coin ${currency.color}">
+        <span class="wallet-coin-mark">${coinLabel(currency.code)}</span>
+        <span class="wallet-coin-name">${currency.label}</span>
+        <strong>${formatWalletAmount(balances[currency.code])}</strong>
+      </div>`).join("");
+    for (const side of ["buy", "sell"]) {
+      for (const currency of ["P", "G", "S"]) {
+        const input = el.querySelector(`[data-wallet-rate="${side}.${currency}"]`);
+        if (input && input !== document.activeElement) input.value = rates[side][currency];
+      }
+    }
+    const list = el.querySelector(".wallet-transactions");
+    const transactions = wallet.transactions;
+    list.innerHTML = transactions.length ? transactions.map(transaction => {
+      const amounts = transaction.amounts || { [transaction.currency]: transaction.amount };
+      const date = new Date(transaction.at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+      const sign = transaction.type === "income" ? "+" : "−";
+      const description = transaction.description || (transaction.type === "income" ? "Пополнение" : "Расход");
+      return `<article class="wallet-transaction ${transaction.type}">
+        <div class="wallet-transaction-copy"><strong>${escapeHtml(description)}</strong><span>${date} · ${transaction.type === "income" ? "Приход" : "Расход"}</span></div>
+        <b>${walletCurrencies.filter(c => amounts[c.code] > 0).map(c => sign + formatWalletAmount(amounts[c.code]) + " " + coinLabel(c.code)).join(" · ")}</b>
+        <button type="button" data-delete-transaction="${escapeHtml(transaction.id)}" aria-label="Удалить операцию: ${escapeHtml(description)}" title="Удалить операцию">×</button>
+      </article>`;
+    }).join("") : '<div class="wallet-empty">История пока пуста. Добавьте первую операцию.</div>';
+  }
+  function buildWallet(note, el) {
+    el.innerHTML = `<div class="wallet-shell">
+      <header class="wallet-header">
+        <div class="wallet-brand"><span class="wallet-brand-mark">✦</span><div><small>УЧЁТ МОНЕТ</small><h2 class="wallet-title"></h2></div></div>
+      </header>
+      <section class="wallet-summary">
+        <div><span>ВСЕГО В МЕДИ</span><strong class="wallet-copper-total">0 м.</strong></div>
+        <label class="wallet-auto wallet-interactive"><input class="wallet-auto-input" type="checkbox"><span class="wallet-switch"></span><small>Авторазмен</small></label>
+      </section>
+      <div class="wallet-coins"></div>
+      <details class="wallet-rates wallet-interactive">
+        <summary><span>Курсы обмена</span><small>покупка / продажа</small></summary>
+        <div class="wallet-rate-head"><span>Обмен</span><span>Покупка</span><span>Продажа</span></div>
+        <label class="wallet-rate-row"><span>1 П → З</span><input type="number" min="1" step="1" inputmode="numeric" data-wallet-rate="buy.P" aria-label="Покупка платины"><input type="number" min="1" step="1" inputmode="numeric" data-wallet-rate="sell.P" aria-label="Продажа платины"></label>
+        <label class="wallet-rate-row"><span>1 З → С</span><input type="number" min="1" step="1" inputmode="numeric" data-wallet-rate="buy.G" aria-label="Покупка золота"><input type="number" min="1" step="1" inputmode="numeric" data-wallet-rate="sell.G" aria-label="Продажа золота"></label>
+        <label class="wallet-rate-row"><span>1 С → М</span><input type="number" min="1" step="1" inputmode="numeric" data-wallet-rate="buy.S" aria-label="Покупка серебра"><input type="number" min="1" step="1" inputmode="numeric" data-wallet-rate="sell.S" aria-label="Продажа серебра"></label>
+        <small class="wallet-rate-hint">Авторазмен использует курс продажи.</small>
+      </details>
+      <form class="wallet-entry wallet-interactive">
+        <div class="wallet-entry-label"><span>Новая операция</span><small>доход или расход</small></div>
+        <div class="wallet-multi-head"><span></span>${walletCurrencies.map(c => `<span>${coinLabel(c.code)}</span>`).join("")}</div>
+        ${["income", "expense"].map(type => `<div class="wallet-multi-row"><span>${type === "income" ? "Приход" : "Расход"}</span>${walletCurrencies.map(c => `<input name="${type}.${c.code}" type="number" min="0" step="1" inputmode="numeric" placeholder="0" aria-label="${type === "income" ? "Приход" : "Расход"}: ${c.name}">`).join("")}</div>`).join("")}
+        <div class="wallet-entry-row description-row">
+          <input name="description" type="text" maxlength="80" placeholder="Описание операции" aria-label="Описание операции">
+          <button type="submit" aria-label="Добавить операцию" title="Добавить операцию">Добавить <span>＋</span></button>
+        </div>
+      </form>
+      <section class="wallet-history wallet-interactive">
+        <div class="wallet-history-head"><span>История операций</span><small>все операции</small></div>
+        <div class="wallet-transactions"></div>
+      </section>
+    </div>`;
+    const form = el.querySelector(".wallet-entry");
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const entries = ["income", "expense"].map(type => ({
+        id: crypto.randomUUID(), at: Date.now(), type,
+        amounts: Object.fromEntries(walletCurrencies.map(c => [c.code, Number(formData.get(type + "." + c.code) || 0)])),
+        description: String(formData.get("description") || "").trim()
+      }));
+      if (entries.some(tx => Object.values(tx.amounts).some(v => !Number.isSafeInteger(v) || v < 0))) return;
+      const filled = entries.filter(tx => Object.values(tx.amounts).some(v => v > 0));
+      if (!filled.length) return;
+      note.transactions.unshift(...filled);
+      form.reset();
+      updateWalletView(note, el);
+      save();
+    });
+    el.addEventListener("change", event => {
+      const target = event.target;
+      if (target.matches(".wallet-auto-input")) {
+        note.autoConvert = target.checked;
+      } else if (target.matches("[data-wallet-rate]")) {
+        const [side, currency] = target.dataset.walletRate.split(".");
+        const amount = Number(target.value);
+        if (!Number.isSafeInteger(amount) || amount <= 0) {
+          target.value = note.rates[side][currency];
+          updateWalletView(note, el);
+          return;
+        }
+        note.rates[side][currency] = amount;
+      } else {
+        return;
+      }
+      updateWalletView(note, el);
+      save();
+    });
+    el.addEventListener("click", event => {
+      const button = event.target.closest("[data-delete-transaction]");
+      if (!button) return;
+      note.transactions = note.transactions.filter(transaction => transaction.id !== button.dataset.deleteTransaction);
+      updateWalletView(note, el);
+      save();
+    });
+    updateWalletView(note, el);
+  }
+  function zoomLabel() {
+    return percentFormat.format(camera.scale * 100) + "%";
+  }
+  function drawCamera() {
+    world.style.transform = translate(camera.x, camera.y) + " scale(" + camera.scale + ")";
+    if (paintedScale !== camera.scale) {
+      paintedScale = camera.scale;
+      world.style.setProperty("--handle-scale", 1 / camera.scale);
+      gridStep = 20 * camera.scale;
+      while (gridStep < 11) gridStep *= 2;
+      // Scale a whole-pixel tile so fractional zoom never snaps the grid spacing.
+      const tile = 20 * 2 ** Math.floor(Math.log2(gridStep / 20));
+      gridScale = gridStep / tile;
+      grid.style.backgroundSize = tile + "px " + tile + "px";
+      const dot = limit(camera.scale, .7, 1.8);
+      grid.style.setProperty("--dot", dot / gridScale + "px");
+      grid.style.setProperty("--edge", (dot + .28) / gridScale + "px");
+      if (!zoomEdited) zoomInput.value = zoomLabel();
+      $("minus").disabled = camera.scale <= minZoom;
+      $("plus").disabled = camera.scale >= maxZoom;
+    }
+    // Keep the repeated grid over the viewport while moving it by fractional pixels.
+    const phase = offset => ((offset - gridStep / 2) % gridStep + gridStep) % gridStep - gridStep;
+    grid.style.transform = translate(phase(camera.x), phase(camera.y)) + " scale(" + gridScale + ")";
+    drawTextSelection();
+    placePalette(false);
+  }
+  function drawFrame() {
+    frameId = null;
+    if (pendingMove) {
+      const event = pendingMove;
+      pendingMove = null;
+      moveGesture(event);
+    }
+    if (cameraDirty) {
+      cameraDirty = false;
+      drawCamera();
+    }
+  }
+  function requestDraw() {
+    if (frameId === null) frameId = requestAnimationFrame(drawFrame);
+  }
+  function zoomAt(scale, x, y) {
+    const next = limit(scale, minZoom, maxZoom);
+    if (next === camera.scale) return;
+    const pos = localPoint(x, y);
+    camera.x = x - viewport.left - pos.x * next;
+    camera.y = y - viewport.top - pos.y * next;
+    camera.scale = next;
+    cameraDirty = true;
+    requestDraw();
+    saveSoon();
+  }
+  function zoomCenter(scale) {
+    zoomAt(scale, viewport.left + viewport.width / 2, viewport.top + viewport.height / 2);
+  }
+
+  function applyTextFormat(note, el) {
+    el.style.setProperty("--text-size", note.fontSize + "px");
+    el.style.setProperty("--text-font", '"' + note.font + '", "Segoe UI", sans-serif');
+    el.style.setProperty("--text-weight", note.bold ? "700" : "400");
+    el.style.setProperty("--text-style", note.italic ? "italic" : "normal");
+    el.style.setProperty("--text-decoration", note.underline ? "underline" : "none");
+    el.style.setProperty("--text-align", note.align);
+    el.style.setProperty("--ink", note.ink);
+  }
+  function adjustText(note, el) {
+    if (isText(note)) {
+      // A final newline needs a line box of its own, just as it has in the textarea.
+      el.querySelector(".note-content").textContent = note.text + (note.text.endsWith("\n") ? "\u200b" : "");
+      el.setAttribute("aria-label", note.text || "Пустая текстовая область");
+      return;
+    }
+    const length = note.text.length;
+    const lines = note.text.split("\n").length;
+    el.classList.toggle("compact", length > 75 || lines > 5);
+    el.classList.toggle("dense", length > 120 || lines > 7);
+    el.classList.toggle("long", length > 170 || lines > 8);
+    if (editor?.el === el) {
+      const body = el.querySelector(".note-content");
+      body.textContent = note.text + (note.text.endsWith("\n") ? "\u200b" : "");
+      editor.field.style.paddingTop = body.offsetTop + "px";
+    }
+    el.setAttribute("aria-label", note.text || "Пустой стикер");
+  }
+  function addElement(note) {
+    const el = document.createElement("article");
+    el.className = isRpg(note) ? "note rpg-card" : isText(note) ? "note text-area" : isWallet(note) ? "note wallet-card" : isImage(note) ? "note image-card" : "note";
+    el.tabIndex = 0;
+    el.dataset.id = note.id;
+    el.style.setProperty("--tilt", note.tilt + "deg");
+    if (isText(note)) applyTextFormat(note, el);
+    else if (!isScalable(note)) el.style.setProperty("--paper", papers[note.color][0]);
+    positionNote(note, el);
+    if (isScalable(note)) {
+      if (isRpg(note)) RpgTracker.mount(el, note.tracker, save);
+      else if (isWallet(note)) buildWallet(note, el);
+      else {
+        const img = document.createElement("img");
+        img.alt = note.name || "Изображение";
+        img.draggable = false;
+        el.append(img);
+        readImageAsset(note.assetId).then(blob => {
+          if (!blob || !el.isConnected) { if (!blob) img.alt = "Файл изображения недоступен"; return; }
+          const url = URL.createObjectURL(blob);
+          img.onload = img.onerror = () => URL.revokeObjectURL(url);
+          img.src = url;
+        }).catch(() => { img.alt = "Не удалось загрузить изображение"; });
+      }
+      const corners = document.createElement("div");
+      corners.className = "note-corners";
+      corners.innerHTML = ["nw", "ne", "sw", "se"].map(c => `<span class="resize-handle" data-corner="${c}" title="Масштабировать элемент"></span>`).join("");
+      el.append(corners);
+    } else {
+      const body = document.createElement("div");
+      body.className = "note-content";
+      body.textContent = note.text;
+      const corners = document.createElement("div");
+      corners.className = "note-corners";
+      corners.setAttribute("aria-hidden", "true");
+      const cornersAndEdges = ["nw", "ne", "sw", "se"];
+      if (isText(note)) cornersAndEdges.push("n", "s", "e", "w");
+      for (const corner of cornersAndEdges) {
+        const handle = document.createElement("span");
+        handle.className = "resize-handle";
+        if (corner.length === 1) handle.dataset.edge = corner;
+        else handle.dataset.corner = corner;
+        handle.title = "Потяните, чтобы изменить размер";
+        corners.append(handle);
+      }
+      el.append(body, corners);
+      adjustText(note, el);
+    }
+    $("notes").append(el);
+    noteElements.set(note.id, el);
+    applyStackOrder();
+    applyLockState(note, el);
+    return el;
+  }
+  function placePalette(measure = true) {
+    drawTextSelection();
+    if (measure) paletteMetrics = null;
+    if (selection.size > 1) { textToolbar.hidden = walletToolbar.hidden = palette.hidden = true; return; }
+    if (!selected || tool !== "select" || gesture?.moving || (editor && !isText(selected))) {
+      textToolbar.hidden = walletToolbar.hidden = palette.hidden = true;
+      return;
+    }
+    const bar = isText(selected) ? textToolbar : isScalable(selected) ? walletToolbar : palette;
+    if (!paletteMetrics) {
+      textToolbar.hidden = bar !== textToolbar;
+      walletToolbar.hidden = bar !== walletToolbar;
+      palette.hidden = bar !== palette;
+      const bounds = noteElements.get(selected.id).getBoundingClientRect();
+      paletteMetrics = {
+        width: bounds.width / paintedScale, height: bounds.height / paintedScale,
+        barWidth: bar.offsetWidth, barHeight: bar.offsetHeight
+      };
+      if (bar === palette) {
+        for (const btn of bar.querySelectorAll(".swatch")) btn.setAttribute("aria-pressed", String(btn.dataset.color === selected.color));
+      }
+    }
+    const { width, height, barWidth, barHeight } = paletteMetrics;
+    // Stickers rotate around their centre. Text areas use their unrotated bounds.
+    const centeredSticker = !isText(selected) && !isScalable(selected);
+    const left = camera.x + (selected.x + (centeredSticker ? (selected.size - width) / 2 : 0)) * camera.scale;
+    const top = camera.y + (selected.y + (centeredSticker ? (selected.size - height) / 2 : 0)) * camera.scale;
+    const bottom = top + height * camera.scale;
+    bar.hidden = bottom < 0 || top > viewport.height || left + width * camera.scale < 0 || left > viewport.width;
+    if (bar.hidden) return;
+    const x = left + (width * camera.scale - barWidth) / 2;
+    const above = top - barHeight - limit(viewport.height * .075, 24, 64);
+    bar.style.transform = translate(limit(x, 6, viewport.width - barWidth - 6),
+      limit(above < 4 ? bottom + 18 : above, 4, viewport.height - barHeight - 4));
+  }
+  function syncTextControls(note) {
+    $("text-font").value = note.font;
+    $("text-size").value = Math.round(note.fontSize);
+    $("text-ink").value = note.ink;
+    textToolbar.style.setProperty("--ink", note.ink);
+    for (const button of textToolbar.querySelectorAll("[data-style], [data-align]")) {
+      const { style, align } = button.dataset;
+      button.setAttribute("aria-pressed", String(style ? !!note[style] : align === note.align));
+    }
+  }
+  function applyLockState(note, el) {
+    el.classList.toggle("locked", !!note.locked);
+    for (const child of el.children) {
+      child.inert = !!note.locked && !((isWallet(note) && child.classList.contains("wallet-shell")) || (isRpg(note) && child.classList.contains("rpg-shell")));
+    }
+  }
+  function syncLockControls() {
+    for (const bar of [palette, textToolbar, walletToolbar]) {
+      for (const child of bar.children) {
+        child.inert = !!selected?.locked && !child.classList.contains("lock-element");
+      }
+      const button = bar.querySelector(".lock-element");
+      if (!button) continue;
+      const label = selected?.locked ? "Разблокировать элемент" : "Заблокировать элемент";
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.setAttribute("aria-pressed", String(!!selected?.locked));
+      button.innerHTML = '<svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="' + (selected?.locked ? 'M8 10V7a4 4 0 0 1 8 0v3' : 'M8 10V7a4 4 0 0 1 8 0') + '"/><path d="M12 14v3"/></svg>';
+    }
+  }
+  function applyStackOrder() {
+    // The persisted array is ordered from the back of the board to the front.
+    notes.forEach((note, index) => {
+      const el = noteElements.get(note.id);
+      if (el) el.style.zIndex = String(index);
+    });
+  }
+  function changeLayer(direction) {
+    const chosen = notes.filter(n => selection.has(n.id));
+    if (!chosen.length || chosen.some(n => n.locked)) return;
+    finishEdit();
+    if (direction === "front" || direction === "back") {
+      const rest = notes.filter(n => !selection.has(n.id));
+      notes = direction === "front" ? [...rest, ...chosen] : [...chosen, ...rest];
+    } else if (direction === "up") {
+      for (let i = notes.length - 2; i >= 0; i--) {
+        if (selection.has(notes[i].id) && !selection.has(notes[i + 1].id)) [notes[i], notes[i + 1]] = [notes[i + 1], notes[i]];
+      }
+    } else {
+      for (let i = 1; i < notes.length; i++) {
+        if (selection.has(notes[i].id) && !selection.has(notes[i - 1].id)) [notes[i], notes[i - 1]] = [notes[i - 1], notes[i]];
+      }
+    }
+    applyStackOrder(); placePalette(); save();
+  }
+  function selectNote(note, additive = false) {
+    const members = note ? notes.filter(n => n.id === note.id || (note.groupId && n.groupId === note.groupId)) : [];
+    if (!additive) selection.clear();
+    const remove = additive && members.every(n => selection.has(n.id));
+    for (const n of members) { if (remove) selection.delete(n.id); else selection.add(n.id); }
+    for (const n of notes) noteElements.get(n.id)?.classList.toggle("selected", selection.has(n.id));
+    note = notes.find(n => selection.has(n.id)) || null;
+    selected = note;
+    if (note) {
+      const el = noteElements.get(note.id);
+      el.classList.add("selected");
+      if (isText(note)) syncTextControls(note);
+      if (isWallet(note)) $("wallet-color").value = note.color;
+    }
+    $("wallet-appearance").open = false;
+    $("wallet-appearance").hidden = !isWallet(note);
+    walletToolbar.querySelector(".wallet-toolbar-label").textContent = isRpg(note) ? "Лист персонажа" : isImage(note) ? "Изображение" : "Кошелёк";
+    $("remove-wallet").title = $("remove-wallet").ariaLabel = isRpg(note) ? "Удалить лист персонажа" : isImage(note) ? "Удалить изображение" : "Удалить кошелёк";
+    syncLockControls();
+    placePalette();
+  }
+  function finishEdit() {
+    if (!editor) return;
+    const { field, note, el } = editor;
+    editor = null;
+    note.text = field.value;
+    el.querySelector(".note-content").textContent = note.text;
+    field.remove();
+    el.classList.remove("editing");
+    adjustText(note, el);
+    placePalette();
+    save();
+  }
+  function editNote(note, offset = note.text.length) {
+    if (note.locked || note.groupId || selection.size > 1) return;
+    finishEdit();
+    selectNote(note);
+    const el = noteElements.get(note.id);
+    const field = document.createElement("textarea");
+    field.className = "note-editor";
+    field.setAttribute("aria-label", isText(note) ? "Текстовая область" : "Текст стикера");
+    field.placeholder = isText(note) ? "Введите текст…" : "Ваш текст…";
+    field.value = note.text;
+    editor = { note, el, field };
+    el.classList.add("editing");
+    palette.hidden = true;
+    el.append(field);
+    adjustText(note, el);
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(offset, offset);
+    field.addEventListener("input", () => {
+      note.text = field.value;
+      adjustText(note, el);
+      if (isText(note)) placePalette();
+      saveSoon();
+    });
+    field.addEventListener("blur", event => {
+      if (!event.relatedTarget?.closest("#text-toolbar")) finishEdit();
+    });
+    placePalette();
+  }
+  function setTool(next) {
+    finishEdit();
+    tool = next;
+    $("select-tool").setAttribute("aria-pressed", String(next === "select"));
+    $("note-tool").setAttribute("aria-pressed", String(next === "note"));
+    $("text-tool").setAttribute("aria-pressed", String(next === "text"));
+    $("rpg-tool").setAttribute("aria-pressed", String(next === "rpg"));
+    $("wallet-tool").setAttribute("aria-pressed", String(next === "wallet"));
+    canvas.classList.toggle("placing", next === "note");
+    canvas.classList.toggle("placing-text", next === "text");
+    canvas.classList.toggle("placing-wallet", next === "wallet");
+    const tip = $("placement-tip");
+    tip.hidden = next === "select";
+    tip.textContent = next === "rpg" ? "Нажмите на холст, чтобы добавить лист персонажа" : next === "text" ? "Нажмите, чтобы ввести текст, или потяните, чтобы задать ширину" :
+      next === "wallet" ? "Нажмите на холст, чтобы добавить кошелёк" : "Нажмите на холст, чтобы добавить стикер";
+    if (next !== "select") selectNote(null);
+    setHelp(false);
+  }
+  function createNote(point) {
+    const note = { id: crypto.randomUUID(), x: point.x - defaultSize / 2, y: point.y - defaultSize / 2, size: defaultSize, tilt: 0, color: preferredColor, text: "" };
+    notes.push(note);
+    const el = addElement(note);
+    setTool("select");
+    selectNote(note);
+    el.focus({ preventScroll: true });
+    
+    save();
+  }
+  function createText(point, width) {
+    const note = {
+      id: crypto.randomUUID(), type: "text", text: "", x: point.x, y: point.y, tilt: 0,
+      width, height: 0, fontSize: defaultTextSize, font: textFonts[0], align: "left", ink: "#1c1c1c"
+    };
+    notes.push(note);
+    addElement(note);
+    setTool("select");
+    editNote(note);
+    
+    save();
+  }
+  function createRpg(point) {
+    const scale = Math.min(1, Math.max(.35, (canvas.clientHeight - 150) / (860 * camera.scale)));
+    const note = { id: crypto.randomUUID(), type: "rpg", text: "", tilt: 0,
+      x: point.x - 540 * scale, y: point.y - 430 * scale, width: 1080, height: 860, scale, tracker: RpgTracker.normalize() };
+    notes.push(note); addElement(note); setTool("select"); selectNote(note);  save();
+  }
+  function createWallet(point) {
+    const note = normalizeWallet({
+      id: crypto.randomUUID(), type: "wallet", text: "", title: "Кошелёк",
+      x: point.x - walletWidth / 2, y: point.y - walletHeight / 2, tilt: 0,
+      width: walletWidth, height: walletHeight, rates: defaultWalletRates,
+      autoConvert: true, transactions: []
+    });
+    notes.push(note);
+    const el = addElement(note);
+    setTool("select");
+    selectNote(note);
+    el.focus({ preventScroll: true });
+    
+    save();
+  }
+  function removeNote() {
+    if (selection.size > 1) { removeGroupSelection(); return; }
+    if (!selected || selected.locked || editor) return;
+    if (isWallet(selected) && !window.confirm("Удалить кошелёк?\n\nВсе операции, баланс и настройки этого кошелька будут удалены. Данные не сохранятся, восстановить их будет невозможно.")) return;
+    if (isRpg(selected) && !window.confirm("Удалить лист персонажа? Все навыки, зелья, ресурсы и история действий будут удалены. Данные не сохранятся.")) return;
+    const { id } = selected;
+    selectNote(null);
+    noteElements.get(id).remove();
+    noteElements.delete(id);
+    notes = notes.filter(n => n.id !== id);
+    
+    save();
+  }
+  for (const [color, [hex, label]] of Object.entries(papers)) {
+    const btn = document.createElement("button");
+    btn.className = "swatch";
+    btn.dataset.color = color;
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+    btn.style.setProperty("--paper", hex);
+    btn.innerHTML = icon("check");
+    btn.addEventListener("click", () => {
+      if (!selected) return;
+      preferredColor = selected.color = color;
+      noteElements.get(selected.id).style.setProperty("--paper", hex);
+      placePalette();
+      save();
+    });
+    palette.append(btn);
+  }
+  const remove = document.createElement("button");
+  remove.id = "remove";
+  remove.title = "Удалить стикер";
+  remove.setAttribute("aria-label", remove.title);
+  remove.innerHTML = icon("bin");
+  remove.addEventListener("click", removeNote);
+  palette.append(remove);
+  for (const bar of [palette, textToolbar, walletToolbar]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "lock-element";
+    button.addEventListener("click", () => {
+      if (!selected) return;
+      finishEdit();
+      selected.locked = !selected.locked;
+      const el = noteElements.get(selected.id);
+      applyLockState(selected, el);
+      $("wallet-appearance").open = false;
+      syncLockControls();
+      el.focus({ preventScroll: true });
+      placePalette();
+      save();
+    });
+    bar.append(button);
+    for (const [direction, label, arrow] of [
+      ["down", "На слой ниже", "M17 4v9m-3-3 3 3 3-3"],
+      ["up", "На слой выше", "M17 13V4m-3 3 3-3 3 3"],
+      ["back", "На задний план", "M17 4v9m-3-3 3 3 3-3"],
+      ["front", "На передний план", "M17 13V4m-3 3 3-3 3 3"]
+    ]) {
+      const layerButton = document.createElement("button");
+      layerButton.type = "button";
+      layerButton.className = "layer-element";
+      layerButton.title = label;
+      layerButton.setAttribute("aria-label", label);
+      layerButton.innerHTML = '<svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 9h8v8H3zM7 17v4h9v-5"/><path d="' + arrow + '"/></svg>';
+      layerButton.addEventListener("mousedown", event => event.preventDefault());
+      layerButton.addEventListener("click", () => changeLayer(direction));
+      bar.append(layerButton);
+    }
+  }
+  syncLockControls();
+
+  function formatSelected(changes) {
+    if (!isText(selected) || selected.locked) return;
+    Object.assign(selected, changes);
+    applyTextFormat(selected, noteElements.get(selected.id));
+    syncTextControls(selected);
+    placePalette();
+    save();
+  }
+  textToolbar.addEventListener("mousedown", event => {
+    if (event.target.closest("button")) event.preventDefault();
+  });
+  textToolbar.addEventListener("click", event => {
+    const button = event.target.closest("button");
+    if (!button || !isText(selected)) return;
+    const { style, align } = button.dataset;
+    if (style) formatSelected({ [style]: !selected[style] });
+    if (align) formatSelected({ align });
+  });
+  $("text-font").onchange = event => formatSelected({ font: event.target.value });
+  $("text-size").onchange = event => {
+    const size = event.target.valueAsNumber;
+    if (Number.isFinite(size)) formatSelected({ fontSize: Math.max(1, Math.round(size)) });
+    else if (isText(selected)) syncTextControls(selected);
+  };
+  $("text-ink").oninput = event => formatSelected({ ink: event.target.value });
+  $("remove-text").onclick = () => { finishEdit(); removeNote(); };
+
+  function setHelp(open) {
+    $("help-panel").hidden = !open;
+    $("help").setAttribute("aria-expanded", String(open));
+  }
+  $("select-tool").onclick = () => setTool("select");
+  $("note-tool").onclick = () => setTool("note");
+  $("text-tool").onclick = () => setTool("text");
+  $("rpg-tool").onclick = () => setTool("rpg");
+  $("wallet-tool").onclick = () => setTool("wallet");
+  $("remove-wallet").onclick = removeNote;
+  $("wallet-color").oninput = event => {
+    if (!isWallet(selected)) return;
+    selected.color = event.target.value;
+    noteElements.get(selected.id).style.setProperty("--wallet-color", selected.color);
+    saveSoon();
+  };
+  $("minus").onclick = () => zoomCenter(camera.scale / 1.25);
+  $("plus").onclick = () => zoomCenter(camera.scale * 1.25);
+  zoomInput.onfocus = () => zoomInput.select();
+  zoomInput.oninput = () => { zoomEdited = true; };
+  zoomInput.onblur = () => {
+    if (zoomEdited) {
+      const match = zoomInput.value.trim().match(/^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*%?$/);
+      if (match) zoomCenter(Number(match[1].replace(",", ".")) / 100);
+    }
+    zoomEdited = false;
+    zoomInput.value = zoomLabel();
+  };
+  zoomInput.onkeydown = event => {
+    if (event.key !== "Enter" && event.key !== "Escape") return;
+    event.preventDefault();
+    if (event.key === "Escape") zoomEdited = false;
+    zoomInput.blur();
+  };
+  zoomInput.ondblclick = () => {
+    zoomEdited = false;
+    zoomCenter(1);
+    zoomInput.blur();
+  };
+  $("fit").onclick = () => { fit(); save(); };
+  $("help").onclick = () => setHelp($("help-panel").hidden);
+  document.addEventListener("pointerdown", event => {
+    if (!event.target.closest("#help, #help-panel")) setHelp(false);
+    if (editor && event.target !== editor.field && !event.target.closest("#text-toolbar")) finishEdit();
+  }, true);
+  canvas.addEventListener("contextmenu", event => {
+    if (!event.target.closest("input,select,textarea,.wallet-interactive")) event.preventDefault();
+  });
+  canvas.addEventListener("wheel", event => {
+    if (event.target.closest("#group-toolbar,#text-toolbar,.wallet-interactive") || (event.target.closest("textarea") && !event.ctrlKey)) return;
+    event.preventDefault();
+    if (gesture?.action === "resize" || gesture?.action === "groupResize") return;
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.height : 1);
+    zoomAt(camera.scale * Math.exp(-delta * .0015), event.clientX, event.clientY);
+  }, { passive: false });
+  canvas.addEventListener("pointerdown", event => {
+    if (event.target.closest("#group-toolbar,#group-box,#palette,#text-toolbar,#wallet-toolbar,textarea") || gesture || !event.isPrimary) return;
+    if (event.target.closest(".wallet-interactive")) {
+      const walletEl = event.target.closest(".wallet-card,.rpg-card");
+      const wallet = walletEl && notes.find(item => item.id === walletEl.dataset.id);
+      if (wallet && selected !== wallet) selectNote(wallet);
+      return;
+    }
+    const pan = event.button === 2 || (spaceHeld && event.button === 0);
+    if (!pan && event.button !== 0) return;
+    const el = event.target.closest(".note");
+    const note = el && notes.find(n => n.id === el.dataset.id);
+    if (event.shiftKey && note && !pan && tool === "select") {
+      finishEdit(); selectNote(note, true); event.preventDefault(); return;
+    }
+    if (note?.locked && !pan) {
+      selectNote(note);
+      event.preventDefault();
+      return;
+    }
+    const handle = event.target.closest(".resize-handle");
+    const action = pan ? "pan" : tool === "text" ? "createText" : tool === "rpg" ? "createRpg" : tool === "wallet" ? "createWallet" : tool === "note" ? "create" : handle ? "resize" : note ? "drag" : "background";
+    if (action === "drag" && !selection.has(note.id)) selectNote(note);
+    if (action === "drag" && notes.some(n => selection.has(n.id) && n.locked)) return;
+    const baseSelection = event.shiftKey ? [...selection] : [];
+    if (action === "background") selectNote(null);
+    const target = action === "resize" ? handle : el || canvas;
+    gesture = { action, pointer: event.pointerId, mouseX: event.clientX, mouseY: event.clientY,
+      x: pan || !note ? camera.x : note.x, y: pan || !note ? camera.y : note.y,
+      startPoint: localPoint(event.clientX, event.clientY), note, target, moving: false };
+    gesture.baseSelection = baseSelection;
+    if (action === "drag" && selection.size > 1) gesture.members = snapshotSelection();
+    if (action === "resize" && isScalable(note)) {
+      gesture.corner = handle.dataset.corner;
+      gesture.startScale = note.scale;
+      event.preventDefault();
+    } else if (action === "resize" && isText(note)) {
+      gesture.edge = handle.dataset.edge || handle.dataset.corner;
+      gesture.startWidth = note.width;
+      gesture.startHeight = el.getBoundingClientRect().height / camera.scale;
+      gesture.startFontSize = note.fontSize;
+      event.preventDefault();
+    } else if (action === "resize") {
+      const corner = handle.dataset.corner;
+      const sx = corner.endsWith("e") ? 1 : -1;
+      const sy = corner.startsWith("s") ? 1 : -1;
+      const angle = note.tilt * Math.PI / 180;
+      gesture.axisX = sx * Math.cos(angle) - sy * Math.sin(angle);
+      gesture.axisY = sx * Math.sin(angle) + sy * Math.cos(angle);
+      gesture.startSize = note.size;
+      event.preventDefault();
+    }
+    target.setPointerCapture(event.pointerId);
+    if (action === "pan") canvas.classList.add("panning");
+  });
+  canvas.addEventListener("pointermove", event => {
+    if (!gesture || gesture.pointer !== event.pointerId) return;
+    pendingMove = event;
+    requestDraw();
+  });
+  function moveGesture(event) {
+    const g = gesture;
+    const dx = event.clientX - g.mouseX, dy = event.clientY - g.mouseY;
+    const panning = g.action === "pan" || (g.action === "background" && event.pointerType === "touch");
+    const distance = Math.hypot(dx, dy);
+    if (!g.moving && (distance === 0 || (!panning && g.action !== "drag" && distance < 3))) return;
+    if (!g.moving) {
+      g.moving = true;
+      textToolbar.hidden = walletToolbar.hidden = palette.hidden = true;
+      if (g.action === "drag") g.target.classList.add("dragging");
+    }
+    if (panning) {
+      camera.x = event.clientX - viewport.left - g.startPoint.x * camera.scale;
+      camera.y = event.clientY - viewport.top - g.startPoint.y * camera.scale;
+      cameraDirty = true;
+    } else if (g.action === "groupResize") {
+      previewGroupResize(g, dx / camera.scale, dy / camera.scale);
+    } else if (g.action === "background") {
+      const start = g.startPoint, end = localPoint(event.clientX, event.clientY);
+      const box = { x:Math.min(start.x,end.x), y:Math.min(start.y,end.y), width:Math.abs(end.x-start.x), height:Math.abs(end.y-start.y) };
+      marquee.hidden = false;
+      placeScreenBox(marquee, box);
+      const found = notes.filter(n => { const b = itemBounds(n); return b.x >= box.x && b.y >= box.y && b.x+b.width <= box.x+box.width && b.y+b.height <= box.y+box.height; });
+      selection = new Set(g.baseSelection);
+      for (const n of found) for (const member of notes.filter(m => m.id === n.id || (n.groupId && m.groupId === n.groupId))) selection.add(member.id);
+      selected = notes.find(n => selection.has(n.id)) || null;
+      notes.forEach(n => noteElements.get(n.id).classList.toggle("selected", selection.has(n.id)));
+    } else if (g.action === "createText") {
+      textOutline.hidden = false;
+      textOutline.style.transform = translate(Math.min(g.mouseX, event.clientX) - viewport.left, g.mouseY - viewport.top);
+      textOutline.style.width = Math.max(minTextWidth * camera.scale, Math.abs(dx)) + "px";
+      textOutline.style.height = defaultTextSize * 1.36 * camera.scale + "px";
+    } else if (g.action === "resize" && isScalable(g.note)) {
+      const note = g.note;
+      const west = g.corner.includes("w"), north = g.corner.includes("n");
+      const sx = dx / camera.scale * (west ? -1 : 1), sy = dy / camera.scale * (north ? -1 : 1);
+      note.scale = limit(g.startScale + (sx * note.width + sy * note.height) / (note.width ** 2 + note.height ** 2), isImage(note) ? .05 : .35, isImage(note) ? 10 : 3);
+      note.x = g.x + (west ? note.width * (g.startScale - note.scale) : 0);
+      note.y = g.y + (north ? note.height * (g.startScale - note.scale) : 0);
+      moveNote(note, noteElements.get(note.id));
+    } else if (g.action === "resize" && isText(g.note)) {
+      const note = g.note;
+      const el = noteElements.get(note.id);
+      const west = g.edge.includes("w"), north = g.edge.includes("n");
+      const horizontal = west || g.edge.includes("e");
+      const vertical = north || g.edge.includes("s");
+      if (horizontal && vertical) {
+        const signedX = dx / camera.scale * (west ? -1 : 1);
+        const signedY = dy / camera.scale * (north ? -1 : 1);
+        const scale = Math.max(minTextWidth / g.startWidth,
+          1 + (signedX * g.startWidth + signedY * g.startHeight) /
+          (g.startWidth * g.startWidth + g.startHeight * g.startHeight));
+        g.resizeScale = scale;
+        el.style.transformOrigin = (west ? "100%" : "0%") + " " + (north ? "100%" : "0%");
+        el.style.setProperty("--handle-scale", 1 / (camera.scale * scale));
+        el.style.transform = translate(g.x, g.y) + " scale(" + scale + ")";
+      } else {
+        if (horizontal) {
+          note.width = Math.max(minTextWidth, g.startWidth + dx / camera.scale * (west ? -1 : 1));
+          if (west) note.x = g.x + g.startWidth - note.width;
+        }
+        if (vertical) {
+          note.height = Math.max(0, g.startHeight + dy / camera.scale * (north ? -1 : 1));
+        }
+        positionNote(note, el);
+        if (north) {
+          note.y = g.y + g.startHeight - el.getBoundingClientRect().height / camera.scale;
+          moveNote(note, el);
+        }
+      }
+    } else if (g.action === "resize") {
+      // Project the mouse movement onto this diagonal in board coordinates.
+      const delta = (dx * g.axisX + dy * g.axisY) / (2 * camera.scale);
+      const size = Math.max(minSize, g.startSize + delta);
+      const halfChange = (size - g.startSize) / 2;
+      g.note.size = size;
+      g.note.x = g.x + halfChange * (g.axisX - 1);
+      g.note.y = g.y + halfChange * (g.axisY - 1);
+      positionNote(g.note, noteElements.get(g.note.id));
+    } else if (g.action === "drag" && g.members) {
+      for (const original of g.members) {
+        const n = original.note;
+        n.x = original.x + dx / camera.scale; n.y = original.y + dy / camera.scale;
+        moveNote(n, noteElements.get(n.id));
+      }
+    } else if (g.action === "drag") {
+      const point = localPoint(event.clientX, event.clientY);
+      g.note.x = g.x + (point.x - g.startPoint.x);
+      g.note.y = g.y + (point.y - g.startPoint.y);
+      moveNote(g.note, g.target);
+    }
+    drawTextSelection();
+  }
+  function endGesture(event) {
+    if (!gesture || (event.pointerId !== undefined && event.pointerId !== gesture.pointer)) return;
+    // A release can arrive before the scheduled frame or beyond the last move.
+    if (event.type === "pointerup") pendingMove = event;
+    if (frameId !== null) cancelAnimationFrame(frameId);
+    drawFrame();
+    const g = gesture;
+    gesture = null;
+    marquee.hidden = true;
+    if (g.action === "groupResize") commitGroupResize(g);
+    if (g.action === "background" && g.moving) {
+      const picked = notes.filter(n => selection.has(n.id));
+      selectNote(null);
+      for (const n of picked) if (!selection.has(n.id)) selectNote(n, true);
+    }
+    syncLockControls();
+    if (g.action === "resize" && isText(g.note) && g.resizeScale !== undefined) {
+      const note = g.note;
+      const el = noteElements.get(note.id);
+      const west = g.edge.includes("w"), north = g.edge.includes("n");
+      note.width = g.startWidth * g.resizeScale;
+      note.height = g.startHeight * g.resizeScale;
+      note.fontSize = Math.max(1, g.startFontSize * g.resizeScale);
+      if (west) note.x = g.x + g.startWidth - note.width;
+      el.style.removeProperty("transform-origin");
+      el.style.removeProperty("--handle-scale");
+      applyTextFormat(note, el);
+      positionNote(note, el);
+      if (north) {
+        note.y = g.y + g.startHeight - el.getBoundingClientRect().height / camera.scale;
+        moveNote(note, el);
+      }
+    }
+    if (g.target.hasPointerCapture(g.pointer)) g.target.releasePointerCapture(g.pointer);
+    g.target.classList.remove("dragging");
+    canvas.classList.remove("panning");
+    textOutline.hidden = true;
+    if (event.type === "pointerup" && g.action === "createText") {
+      const start = localPoint(g.mouseX, g.mouseY);
+      const end = localPoint(event.clientX, event.clientY);
+      const dragged = Math.abs(event.clientX - g.mouseX) >= 4;
+      const width = dragged ? Math.max(minTextWidth, Math.abs(end.x - start.x)) :
+        Math.min(defaultTextWidth, Math.max(minTextWidth, (canvas.clientWidth - 64) / camera.scale));
+      createText({ x: dragged ? Math.min(start.x, end.x) : start.x, y: start.y }, width);
+    } else if (event.type === "pointerup" && g.action === "create" && !g.moving) {
+      createNote(localPoint(event.clientX, event.clientY));
+    } else if (event.type === "pointerup" && g.action === "createRpg" && !g.moving) {
+      createRpg(localPoint(event.clientX, event.clientY));
+    } else if (event.type === "pointerup" && g.action === "createWallet" && !g.moving) {
+      createWallet(localPoint(event.clientX, event.clientY));
+    } else {
+      if (g.moving && g.action === "resize" && isText(g.note)) syncTextControls(g.note);
+      placePalette();
+      if (g.moving) save();
+    }
+  }
+  canvas.addEventListener("pointerup", endGesture);
+  canvas.addEventListener("pointercancel", endGesture);
+  canvas.addEventListener("lostpointercapture", endGesture);
+  canvas.addEventListener("dblclick", event => {
+    if (tool !== "select" || spaceHeld || event.button !== 0 || event.target.closest("textarea,#palette,#text-toolbar,#wallet-toolbar,.wallet-interactive,.resize-handle")) return;
+    const el = event.target.closest(".note");
+    if (!el) return;
+    const note = notes.find(n => n.id === el.dataset.id);
+    if (!note || isScalable(note)) return;
+    const caret = document.caretRangeFromPoint?.(event.clientX, event.clientY);
+    const body = el.querySelector(".note-content");
+    const offset = caret && caret.startContainer === body.firstChild ? caret.startOffset : note.text.length;
+    editNote(note, offset);
+  });
+  function releaseSpace() {
+    spaceHeld = false;
+    canvas.classList.remove("pan-ready");
+  }
+  window.addEventListener("keydown", event => {
+    if (event.isComposing) return;
+    if (event.target.closest("#text-toolbar")) {
+      if (event.key === "Escape") (editor?.field || noteElements.get(selected?.id))?.focus({ preventScroll: true });
+      return;
+    }
+    if (event.target.matches("textarea,input,select,[contenteditable=true]")) {
+      if (event.key === "Escape" && editor) {
+        const el = editor.el;
+        finishEdit();
+        el.focus({ preventScroll: true });
+      }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.code === "KeyG") { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.code === "Space" && !event.target.closest("button")) {
+      event.preventDefault();
+      spaceHeld = true;
+      canvas.classList.add("pan-ready");
+    }
+    if (event.repeat) return;
+    if (event.key === "Escape") { setTool("select"); selectNote(null); }
+    if (event.code === "KeyN") setTool("note");
+    if (event.code === "KeyT") setTool("text");
+    if (event.code === "KeyW") setTool("wallet");
+    if (event.code === "KeyV") setTool("select");
+    if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); removeNote(); }
+    if (event.key === "Enter" && event.target.closest(".note")) {
+      const note = notes.find(n => n.id === event.target.closest(".note").dataset.id);
+      if (!note || isScalable(note)) return;
+      event.preventDefault();
+      editNote(note);
+    }
+  });
+  window.addEventListener("keyup", event => { if (event.code === "Space") releaseSpace(); });
+  window.addEventListener("blur", event => { releaseSpace(); endGesture(event); });
+  window.addEventListener("pagehide", save);
+  window.addEventListener("resize", () => {
+    viewport = canvas.getBoundingClientRect();
+    placePalette();
+    saveSoon();
+  });
+
+
+  let imageDatabase;
+  function imageStore() {
+    if (!imageDatabase) imageDatabase = new Promise((resolve, reject) => {
+      const request = indexedDB.open("listok.images.v1", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("images");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    }).catch(error => { imageDatabase = null; throw error; });
+    return imageDatabase;
+  }
+  async function readImageAsset(id) {
+    const db = await imageStore();
+    return new Promise((resolve, reject) => {
+      const request = db.transaction("images").objectStore("images").get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  async function addImages(files, point) {
+    const candidates = Array.from(files).filter(file => file.type.startsWith("image/"));
+    let offset = 0;
+    for (const file of candidates) {
+      try {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        try { img.src = url; await img.decode(); } finally { URL.revokeObjectURL(url); }
+        if (!img.naturalWidth || !img.naturalHeight) throw new Error("Размер изображения недоступен");
+        const factor = Math.min(1, 480 / img.naturalWidth, 420 / img.naturalHeight);
+        const width = img.naturalWidth * factor, height = img.naturalHeight * factor;
+        const assetId = crypto.randomUUID();
+        const db = await imageStore();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction("images", "readwrite");
+          tx.objectStore("images").put(file, assetId);
+          tx.oncomplete = resolve;
+          tx.onerror = tx.onabort = () => reject(tx.error);
+        });
+        const note = { id: crypto.randomUUID(), type: "image", assetId, name: file.name || "Изображение", width, height, scale: 1, tilt: 0, x: point.x - width / 2 + offset, y: point.y - height / 2 + offset };
+        notes.push(note);
+        addElement(note);
+        setTool("select");
+        selectNote(note);
+        
+        save();
+        offset += 24;
+      } catch {
+        window.alert("Не удалось добавить изображение «" + (file.name || "Изображение") + "». Проверьте формат файла и доступное место в браузере.");
+      }
+    }
+  }
+  const imageCenter = () => localPoint(viewport.left + viewport.width / 2, viewport.top + viewport.height / 2);
+  $("image-tool").onclick = () => { $("image-file").value = ""; $("image-file").click(); };
+  $("image-file").onchange = event => addImages(event.target.files, imageCenter());
+  document.addEventListener("paste", event => {
+    if (event.target.closest("input,textarea,[contenteditable=true]")) return;
+    const files = Array.from(event.clipboardData?.items || []).filter(item => item.kind === "file" && item.type.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    event.preventDefault();
+    addImages(files, imageCenter());
+  });
+  canvas.addEventListener("dragover", event => {
+    if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
+  });
+  canvas.addEventListener("drop", event => {
+    if (!event.dataTransfer.files.length) return;
+    event.preventDefault();
+    viewport = canvas.getBoundingClientRect();
+    addImages(event.dataTransfer.files, localPoint(event.clientX, event.clientY));
+  });
+
+
+  const groupBox = document.createElement("div");
+  groupBox.id = "group-box"; groupBox.hidden = true;
+  groupBox.innerHTML = ["nw","ne","sw","se"].map(c => `<span data-group-corner="${c}" class="group-handle ${c}"></span>`).join("");
+  const groupToolbar = document.createElement("div"); groupToolbar.id = "group-toolbar"; groupToolbar.hidden = true;
+  const marquee = document.createElement("div"); marquee.id = "selection-marquee"; marquee.hidden = true;
+  canvas.append(groupBox, groupToolbar, marquee);
+  for (const [label, action] of [["Сгруппировать",groupSelection],["Разгруппировать",ungroupSelection],["На слой ниже",()=>changeLayer("down")],["На слой выше",()=>changeLayer("up")],["На задний план",()=>changeLayer("back")],["На передний план",()=>changeLayer("front")],["Удалить",removeGroupSelection]]) {
+    const button = document.createElement("button"); button.textContent = label;
+    button.onmousedown = e => e.preventDefault(); button.onclick = action; groupToolbar.append(button);
+  }
+  function itemBounds(note) {
+    const b = noteElements.get(note.id).getBoundingClientRect();
+    return { x:(b.left-viewport.left-camera.x)/camera.scale, y:(b.top-viewport.top-camera.y)/camera.scale, width:b.width/camera.scale, height:b.height/camera.scale };
+  }
+  function selectionBounds() {
+    const boxes = notes.filter(n=>selection.has(n.id)).map(itemBounds);
+    const x=Math.min(...boxes.map(b=>b.x)), y=Math.min(...boxes.map(b=>b.y));
+    return {x,y,width:Math.max(...boxes.map(b=>b.x+b.width))-x,height:Math.max(...boxes.map(b=>b.y+b.height))-y};
+  }
+  function placeScreenBox(el,b) {
+    el.style.transform=translate(camera.x+b.x*camera.scale,camera.y+b.y*camera.scale);
+    el.style.width=b.width*camera.scale+"px"; el.style.height=b.height*camera.scale+"px";
+  }
+  function drawGroupSelection() {
+    const multiple = selection.size > 1;
+    canvas.classList.toggle("multi-selection",multiple);
+    groupBox.hidden = groupToolbar.hidden = !multiple;
+    if (!multiple) return;
+    const b=selectionBounds(); placeScreenBox(groupBox,b);
+    const locked=notes.some(n=>selection.has(n.id)&&n.locked);
+    groupBox.classList.toggle("group-locked",locked);
+    for(const button of groupToolbar.children) button.disabled=locked;
+    groupToolbar.hidden=!!gesture?.moving;
+    groupToolbar.style.transform=translate(limit(camera.x+b.x*camera.scale,6,Math.max(6,viewport.width-groupToolbar.offsetWidth-6)),limit(camera.y+b.y*camera.scale-48,6,viewport.height-48));
+  }
+  function groupSelection() {
+    const members=notes.filter(n=>selection.has(n.id));
+    if(members.length<2||members.some(n=>n.locked)) return;
+    finishEdit(); const id=crypto.randomUUID(); members.forEach(n=>n.groupId=id); save(); placePalette();
+  }
+  function ungroupSelection() {
+    const members=notes.filter(n=>selection.has(n.id));
+    if(members.some(n=>n.locked)) return;
+    members.forEach(n=>delete n.groupId); save(); placePalette();
+  }
+  function removeGroupSelection() {
+    const members=notes.filter(n=>selection.has(n.id));
+    if(!members.length||members.some(n=>n.locked)) return;
+    if(members.some(n => isWallet(n) || isRpg(n))&&!confirm("Удалить выбранные элементы? Все данные кошельков и листов персонажа будут удалены без возможности восстановления.")) return;
+    finishEdit(); const ids=new Set(selection); selectNote(null);
+    for(const id of ids){ noteElements.get(id).remove(); noteElements.delete(id); }
+    notes=notes.filter(n=>!ids.has(n.id)); applyStackOrder();  save();
+  }
+  function snapshotSelection() {
+    return notes.filter(n=>selection.has(n.id)).map(note=>({note,x:note.x,y:note.y,width:note.width,height:isText(note)?noteElements.get(note.id).getBoundingClientRect().height/camera.scale:note.height,size:note.size,fontSize:note.fontSize,scale:note.scale}));
+  }
+  groupBox.addEventListener("pointerdown",event=>{
+    const handle=event.target.closest("[data-group-corner]");
+    if(!handle||gesture||event.button!==0||notes.some(n=>selection.has(n.id)&&n.locked)) return;
+    event.preventDefault(); finishEdit();
+    gesture={action:"groupResize",pointer:event.pointerId,mouseX:event.clientX,mouseY:event.clientY,target:handle,moving:false,corner:handle.dataset.groupCorner,bounds:selectionBounds(),members:snapshotSelection()};
+    handle.setPointerCapture(event.pointerId);
+  });
+  function previewGroupResize(g,dx,dy) {
+    const b=g.bounds, west=g.corner.includes("w"), north=g.corner.includes("n");
+    const minFactor=Math.max(...g.members.map(m=>isScalable(m.note)?(isImage(m.note)?.05:.35)/m.scale:isText(m.note)?Math.max(minTextWidth/m.width,1/m.fontSize):minSize/m.size));
+    const maxFactor=Math.min(...g.members.map(m=>isScalable(m.note)?(isImage(m.note)?10:3)/m.scale:Infinity));
+    const k=limit(1+((west?-dx:dx)*b.width+(north?-dy:dy)*b.height)/(b.width*b.width+b.height*b.height),minFactor,maxFactor);
+    g.factor=k;
+    const ax=b.x+(west?b.width:0), ay=b.y+(north?b.height:0);
+    for(const m of g.members){
+      const el=noteElements.get(m.note.id);
+      const x=ax+(m.x-ax)*k,y=ay+(m.y-ay)*k;
+      el.style.transformOrigin="0 0";
+      el.style.transform=translate(x,y)+" scale("+(isScalable(m.note)?m.scale*k:k)+") rotate(var(--tilt,0deg))";
+    }
+  }
+  function commitGroupResize(g) {
+    const k=g.factor||1,b=g.bounds,ax=b.x+(g.corner.includes("w")?b.width:0),ay=b.y+(g.corner.includes("n")?b.height:0);
+    for(const m of g.members){
+      const n=m.note,el=noteElements.get(n.id);
+      n.x=ax+(m.x-ax)*k; n.y=ay+(m.y-ay)*k;
+      if(isScalable(n)) n.scale=m.scale*k;
+      else if(isText(n)){ n.width=m.width*k; n.height=m.height*k; n.fontSize=m.fontSize*k; applyTextFormat(n,el); }
+      else n.size=m.size*k;
+      el.style.removeProperty("transform-origin"); positionNote(n,el);
+    }
+  }
+
+  function boardSnapshot() {
+    document.activeElement?.blur();
+    finishEdit();
+    return JSON.parse(JSON.stringify({ version: 1, notes, camera, preferredColor, width: canvas.clientWidth, height: canvas.clientHeight }));
+  }
+  function validBackupBoard(data) {
+    try {
+      if (Array.isArray(data?.notes)) for (const note of data.notes) {
+        if (isRpg(note)) RpgTracker.normalize(note.tracker);
+        if (isWallet(note)) normalizeWallet(note);
+      }
+    } catch { return false; }
+    return data && data.version === 1 && Array.isArray(data.notes) && data.notes.every(n =>
+      validNote(n) && [undefined, "text", "wallet", "image", "rpg"].includes(n.type) &&
+      (!isScalable(n) || (Number.isFinite(n.scale) && n.scale > 0 && Number.isFinite(n.width) && n.width > 0 && Number.isFinite(n.height) && n.height > 0)) &&
+      (!isRpg(n) || (n.tracker && typeof n.tracker === "object" && Array.isArray(n.tracker.skills)))) &&
+      new Set(data.notes.map(n => n.id)).size === data.notes.length &&
+      data.camera && [data.camera.x, data.camera.y, data.camera.scale].every(Number.isFinite) &&
+      data.camera.scale >= minZoom && data.camera.scale <= maxZoom;
+  }
+  async function restoreBackup({ board, images }) {
+    // New keys keep existing assets intact if storage runs out before the board is committed.
+    const remap = new Map([...images.keys()].map(id => [id, crypto.randomUUID()]));
+    const data = JSON.parse(JSON.stringify(board));
+    data.notes.forEach(n => { if (isImage(n)) n.assetId = remap.get(n.assetId); });
+    let db;
+    if (images.size) {
+      db = await imageStore();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction("images", "readwrite"), store = tx.objectStore("images");
+        for (const [id, blob] of images) store.put(blob, remap.get(id));
+        tx.oncomplete = resolve;
+        tx.onerror = tx.onabort = () => reject(new Error("Не хватило места для картинок или хранилище недоступно. Текущая доска не изменена."));
+      });
+    }
+    document.activeElement?.blur(); finishEdit(); clearTimeout(saveTimer);
+    try { localStorage.setItem(storageKey, JSON.stringify(data)); }
+    catch {
+      if (db) await new Promise(resolve => {
+        const tx = db.transaction("images", "readwrite"), store = tx.objectStore("images");
+        for (const id of remap.values()) store.delete(id);
+        tx.oncomplete = tx.onerror = tx.onabort = resolve;
+      });
+      throw new Error("Хранилище браузера недоступно или переполнено. Текущая доска не заменена.");
+    }
+    restoringBackup = true;
+    location.reload();
+  }
+  ListokBackup.mount({ snapshot: boardSnapshot, readAsset: readImageAsset, validateBoard: validBackupBoard, restoreBoard: restoreBackup });
+
+  const hasCamera = restore();
+  notes.forEach(addElement);
+  
+  if (hasCamera) drawCamera(); else fit(true);
+  if (notes.length) selectNote(notes[0]);
+  save();
+})();
+</script>
+</body>
+</html>

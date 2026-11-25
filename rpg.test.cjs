@@ -1,0 +1,34 @@
+const assert = require('node:assert/strict');
+const { normalize, dispatch: act } = require('./rpg.js');
+const skill = (id, type, cooldown) => ({id,name:id,cooldown_type:type,cooldown});
+let s = normalize({skills:[skill('turn','turns',3),skill('day','days',4),skill('rest','rest',0),skill('free','none',0)]});
+act(s,{type:'use',id:'turn'}); assert.equal(s.turn,1); assert.equal(s.skills[0].remaining,2);
+assert.equal(act(s,{type:'use',id:'turn'}),false);
+act(s,{type:'mode',value:'dodge'}); act(s,{type:'use',id:'day'}); act(s,{type:'use',id:'rest'});
+assert.equal(s.turn,1); assert.equal(s.skills[0].remaining,2); assert.equal(s.skills[1].remaining,4); assert.equal(s.skills[2].remaining,1);
+act(s,{type:'turn'}); assert.equal(s.skills[0].remaining,1); assert.equal(s.skills[1].remaining,4);
+act(s,{type:'rest'}); assert.equal(s.turn,0); assert.equal(s.skills[0].remaining,1); assert.equal(s.skills[1].remaining,4); assert.equal(s.skills[2].remaining,0);
+act(s,{type:'undo'}); assert.equal(s.turn,2); assert.equal(s.skills[2].remaining,1);
+act(s,{type:'skill',skill:{...s.skills[0],cooldown:0}}); assert.equal(s.skills[0].remaining,0);
+act(s,{type:'skill',skill:{...s.skills[1],cooldown_type:'turns'}}); assert.equal(s.skills[1].remaining,0);
+for (const [size,cap] of [['small',3],['medium',6],['large',9]]) for(const color of ['red','blue']) {
+ const key=size+'-'+color;
+ act(s,{type:'potion',key,operation:'stock',value:20.9});
+ assert.equal(s.potions[key].stock,20);
+ act(s,{type:'potion',key,operation:'give'}); assert.equal(s.potions[key].given,1);
+ act(s,{type:'potion',key,operation:'drink'}); assert.equal(s.potions[key].stock,18);
+ for(let i=1;i<cap;i++) act(s,{type:'potion',key,operation:'receive'});
+ assert.equal(s.potions[key].drunk,cap); assert.equal(s.potions[key].stock,18);
+ assert.equal(act(s,{type:'potion',key,operation:'drink'}),false);
+ assert.equal(act(s,{type:'potion',key,operation:'receive'}),false);
+}
+act(s,{type:'resource',key:'temporary',value:7});
+act(s,{type:'day'}); assert.equal(s.resources.temporary,7); Object.values(s.potions).forEach(p=>assert.equal(p.drunk,0));
+act(s,{type:'resource',key:'rageTotal',value:3}); act(s,{type:'resource',key:'rage',value:3});
+act(s,{type:'spend',key:'madness'}); assert.equal(s.resources.rage,1); assert.equal(act(s,{type:'spend',key:'madness'}),false);
+act(s,{type:'undo'}); assert.equal(s.resources.rage,3);
+act(s,{type:'resource',key:'rageTotal',value:1}); assert.equal(s.resources.rage,1);
+assert.deepEqual(normalize(JSON.parse(JSON.stringify(s))),s);
+for(let i=0;i<60;i++) act(s,{type:'turn'}); assert.equal(s.history.length,50);
+s=normalize({skills:[skill('day','days',4)]}); act(s,{type:'use',id:'day'}); act(s,{type:'day'}); assert.equal(s.skills[0].remaining,3);
+console.log('RPG rules: action/dodge, cooldowns, rest/day, editing, six potion limits, resources, undo and serialization passed.');
