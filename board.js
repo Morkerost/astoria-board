@@ -20,10 +20,13 @@
   const isRpg = item => item?.type === "rpg";
   const isCounter = item => item?.type === "counter";
   const isFlipCard = item => item?.type === "flipcard";
+  const isTable = item => item?.type === "table";
+  const minTableColumn = 80;
+  const minTableRow = 48;
   const isSticky = item => item && !isText(item) && !isScalable(item);
   const cardText = note => isSticky(note) && note.flipped ? note.back?.text || "" : note.text;
   const cardColor = note => isSticky(note) && note.flipped ? note.back?.color || note.color : note.color;
-  const isScalable = item => isWallet(item) || isImage(item) || isRpg(item) || isCounter(item) || isFlipCard(item);
+  const isScalable = item => isWallet(item) || isImage(item) || isRpg(item) || isCounter(item) || isFlipCard(item) || isTable(item);
   const walletWidth = 440;
   const walletHeight = 640;
   const coinLabel = code => ({ P: "П", G: "З", S: "С", C: "М" })[code];
@@ -51,17 +54,20 @@
   const minSize = 64;
   const minZoom = 0.01;
   const maxZoom = 20;
-  const percentFormat = new Intl.NumberFormat("ru-RU", { useGrouping: false, maximumFractionDigits: 0 });  const examples = [
-    { id: "places", x: 0, y: 0, tilt: 0, color: "yellow", text: "Собрать карту любимых мест" },
-    { id: "path", x: 222, y: 0, tilt: 0, color: "yellow", text: "Набросать первый маршрут по городу" },
-    { id: "friends", x: 444, y: 0, tilt: 0, color: "yellow", text: "Спросить друзей про их тайные места" }
-  ];
+  const percentFormat = new Intl.NumberFormat("ru-RU", { useGrouping: false, maximumFractionDigits: 0 });
+  const starterNotes = new Map([["places", "Собрать карту любимых мест"], ["path", "Набросать первый маршрут по городу"], ["friends", "Спросить друзей про их тайные места"]]);
   const icon = name => '<svg class="icon" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
+  const layerIcon = direction => {
+    const arrow = direction === "down" ? "M17 4v9m-3-3 3 3 3-3" : direction === "up" ? "M17 13V4m-3 3 3-3 3 3" :
+      direction === "back" ? "M17 4v9m-3-3 3 3 3-3M13 20h8" : "M17 13V4m-3 3 3-3 3 3M13 2h8";
+    return '<svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 9h8v8H3zM7 17v4h9v-5"/><path d="' + arrow + '"/></svg>';
+  };
+  const boardClipboardPrefix = "HUIRO_BOARD_V1\n";
   const limit = (value, min, max) => Math.min(max, Math.max(min, value));
   const noteElements = new Map();
   const counterRefresh = new Map();
   const rpgRefresh = new Map();
-  let notes = examples.map(note => ({ ...note, size: defaultSize }));
+  let notes = [];
   let camera = { x: 0, y: 0, scale: 1 };
   let selected = null;
   let selection = new Set();
@@ -79,9 +85,14 @@
   let pendingMove = null;
   let contextPoint = null;
   let copiedItems = null;
+  let copiedBounds = null;
   let lastPointerWorld = null;
   const undoStack = [];
   let lastSavedSnapshot = null;
+  let lastStoredValue = null;
+  let remoteUpdatePending = false;
+  let imageCropSession = null;
+  try { lastStoredValue = localStorage.getItem(storageKey); } catch { /* Saving will report unavailable storage. */ }
   let cameraDirty = false;
   let paintedScale = 0;
   let gridStep = 20;
@@ -161,11 +172,35 @@
       transactions: Array.isArray(note.transactions) ? note.transactions.filter(validWalletTransaction) : []
     };
   }
+  function normalizeTable(note) {
+    const columns = Array.isArray(note.table?.columns) && note.table.columns.length ? note.table.columns.slice(0, 50).map(v => limit(Number(v) || 160, minTableColumn, 100000)) : [160, 160, 160];
+    const rows = Array.isArray(note.table?.rows) && note.table.rows.length ? note.table.rows.slice(0, 50).map(v => limit(Number(v) || 60, minTableRow, 100000)) : [60, 60, 60];
+    const cells = rows.map((_, r) => columns.map((_, c) => String(note.table?.cells?.[r]?.[c] ?? "")));
+    return { ...note, width: columns.reduce((a,b) => a+b, 0), height: rows.reduce((a,b) => a+b, 0), scale: Number.isFinite(note.scale) ? limit(note.scale, .05, 20) : 1,
+      table: { columns, rows, cells, borderColor: /^#[0-9a-f]{6}$/i.test(note.table?.borderColor) ? note.table.borderColor : "#b7bec6", borderWidth: limit(Number(note.table?.borderWidth) || 1, .5, 12) } };
+  }
+  function imageMask(note) {
+    const raw = note.mask || {}, crop = raw.crop || {};
+    const w = limit(Number(crop.w) || 1, .05, 1), h = limit(Number(crop.h) || 1, .05, 1);
+    return { shape:["original","circle","square","portrait","landscape","wide","custom"].includes(raw.shape) ? raw.shape : "original",
+      crop:{ x:limit(Number(crop.x) || 0, 0, 1-w), y:limit(Number(crop.y) || 0, 0, 1-h), w, h } };
+  }
+  function imageStroke(note) {
+    const raw = note.stroke || {};
+    return { color:/^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color : "#ffcc33", width:limit(Number(raw.width) || 0, 0, 30),
+      radius:limit(Number(raw.radius) || 0, 0, 200), opacity:limit(Number(raw.opacity) || 1, .05, 1),
+      style:["solid","dashed","dotted"].includes(raw.style) ? raw.style : "solid" };
+  }
+  function imageSourceSize(note) {
+    return { width:Number.isFinite(note.imageSourceWidth) && note.imageSourceWidth > 0 ? note.imageSourceWidth : note.width,
+      height:Number.isFinite(note.imageSourceHeight) && note.imageSourceHeight > 0 ? note.imageSourceHeight : note.height };
+  }
   function validNote(note) {
     if (!note || typeof note.id !== "string" || ![note.x, note.y, note.tilt].every(Number.isFinite)) return false;
     if (isImage(note)) return typeof note.assetId === "string" && Number.isFinite(note.width) && note.width > 0 && Number.isFinite(note.height) && note.height > 0;
     if (isRpg(note)) return !!note.tracker;
     if (isCounter(note)) return !!note.counter;
+    if (isTable(note)) return !!note.table && Array.isArray(note.table.columns) && Array.isArray(note.table.rows) && Array.isArray(note.table.cells);
     if (isFlipCard(note)) return Number.isFinite(note.width) && Number.isFinite(note.height) && note.front && note.back;
     if (isWallet(note)) return Number.isFinite(note.width) && Number.isFinite(note.height);
     return typeof note.text === "string" &&
@@ -176,10 +211,11 @@
       const data = JSON.parse(localStorage.getItem(storageKey));
       if (!data || data.version !== 1 || !Array.isArray(data.notes) || !data.notes.every(validNote)) return false;
       if (new Set(data.notes.map(n => n.id)).size !== data.notes.length) return false;
-      notes = data.notes.map(note => {
-        if (isImage(note)) return { ...note, scale: Number.isFinite(note.scale) ? limit(note.scale, .05, 10) : 1 };
+      notes = data.notes.filter(note => !starterNotes.has(note.id) || starterNotes.get(note.id) !== note.text).map(note => {
+        if (isImage(note)) return { ...note, scale: Number.isFinite(note.scale) ? limit(note.scale, .05, 10) : 1, mask:imageMask(note), stroke:imageStroke(note) };
         if (isRpg(note)) return { ...note, width: 1080, height: 860, scale: Number.isFinite(note.scale) ? limit(note.scale, .35, 3) : 1, tracker: RpgTracker.normalize(note.tracker) };
-        if (isCounter(note)) return { ...note, width: 520, height: 600, scale: Number.isFinite(note.scale) ? limit(note.scale, .35, 3) : 1, counter: CounterWidget.normalize(note.counter) };
+        if (isCounter(note)) return { ...note, width: 520, height: Number.isFinite(note.height) && note.height > 0 ? note.height : 600, scale: Number.isFinite(note.scale) ? limit(note.scale, .35, 3) : 1, counter: CounterWidget.normalize(note.counter) };
+        if (isTable(note)) return normalizeTable(note);
         if (isFlipCard(note)) return { ...note, scale: Number.isFinite(note.scale) ? limit(note.scale, .35, 3) : 1, front: normalizeCardFace(note.front), back: normalizeCardFace(note.back), flipped: !!note.flipped };
         if (isWallet(note)) return normalizeWallet(note);
         if (!isText(note)) {
@@ -221,14 +257,17 @@
     if (restoringBackup) return;
     clearTimeout(saveTimer);
     try {
-      const data = { version: 1, notes, camera, preferredColor, width: canvas.clientWidth, height: canvas.clientHeight };
+      if (syncFromOtherWindow()) return;
+      const data = { version: 1, notes:storedNotes(), camera, preferredColor, width: canvas.clientWidth, height: canvas.clientHeight };
       const serialized = JSON.stringify(data);
       if (lastSavedSnapshot && lastSavedSnapshot !== serialized) {
         undoStack.push(lastSavedSnapshot);
         if (undoStack.length > 50) undoStack.shift();
       }
-      lastSavedSnapshot = serialized;
       localStorage.setItem(storageKey, serialized);
+      lastStoredValue = serialized;
+      lastSavedSnapshot = serialized;
+      window.dispatchEvent(new Event("listok:saved"));
       saved.classList.remove("unsaved");
       saved.lastElementChild.textContent = "Сохранено локально";
     } catch {
@@ -241,6 +280,32 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(save, 160);
   }
+  function storedNotes() {
+    return imageCropSession ? notes.map(note => note === imageCropSession.note ? {...note,...imageCropSession.old} : note) : notes;
+  }
+  function syncFromOtherWindow() {
+    if (restoringBackup) return false;
+    let current;
+    try { current = localStorage.getItem(storageKey); } catch { return false; }
+    if (current === lastStoredValue) { remoteUpdatePending = false; return false; }
+    remoteUpdatePending = true;
+    const editing = document.hasFocus() && document.activeElement?.matches("textarea,input,select,[contenteditable=true]");
+    if (editing || gesture) {
+      saved.classList.add("unsaved");
+      saved.lastElementChild.textContent = "Обновление из другого окна ожидает";
+      return true;
+    }
+    clearTimeout(saveTimer);
+    saved.lastElementChild.textContent = "Загружаем изменения из другого окна";
+    location.reload();
+    return true;
+  }
+  window.addEventListener("storage", event => {
+    if (event.key === storageKey) syncFromOtherWindow();
+  });
+  window.addEventListener("focus", () => { if (remoteUpdatePending || document.visibilityState === "visible") syncFromOtherWindow(); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncFromOtherWindow(); });
+  document.addEventListener("focusout", () => { if (remoteUpdatePending) queueMicrotask(syncFromOtherWindow); });
   function localPoint(x, y) {
     return { x: (x - viewport.left - camera.x) / camera.scale, y: (y - viewport.top - camera.y) / camera.scale };
   }
@@ -602,12 +667,302 @@
       saveSoon();
     });
     shell.querySelector(".flip-card-image").addEventListener("dragstart", event => event.preventDefault());
+    const imageSlot = shell.querySelector(".flip-image-slot");
+    imageSlot.addEventListener("pointerdown", event => {
+      const face = note.flipped ? note.back : note.front;
+      if (event.button !== 0 || !face.assetId) return;
+      const picture = imageSlot.querySelector("img");
+      if (!picture.naturalWidth || !picture.naturalHeight) return;
+      event.preventDefault(); event.stopPropagation();
+      imageSlot.setPointerCapture(event.pointerId);
+      const startX = event.clientX, startY = event.clientY;
+      let ghost = null;
+      const move = e => {
+        if (e.pointerId !== event.pointerId || Math.hypot(e.clientX - startX, e.clientY - startY) < 6 && !ghost) return;
+        if (!ghost) {
+          const preview = document.createElement("canvas"); preview.width = 120; preview.height = 140;
+          const fit = Math.min(preview.width / picture.naturalWidth, preview.height / picture.naturalHeight);
+          const width = picture.naturalWidth * fit, height = picture.naturalHeight * fit;
+          preview.getContext("2d").drawImage(picture, (preview.width - width) / 2, (preview.height - height) / 2, width, height);
+          ghost = document.createElement("img"); ghost.src = preview.toDataURL("image/png");
+          Object.assign(ghost.style, { position: "fixed", width: "120px", height: "140px", pointerEvents: "none", zIndex: "99999", opacity: ".85" });
+          document.body.append(ghost);
+        }
+        ghost.style.left = e.clientX - 60 + "px"; ghost.style.top = e.clientY - 70 + "px";
+      };
+      const end = e => {
+        if (e.pointerId !== event.pointerId) return;
+        imageSlot.removeEventListener("pointermove", move);
+        imageSlot.removeEventListener("pointerup", end);
+        imageSlot.removeEventListener("pointercancel", end);
+        ghost?.remove();
+        if (e.type !== "pointerup" || !ghost || document.elementFromPoint(e.clientX, e.clientY)?.closest(".flip-card") === el) return;
+        const width = picture.naturalWidth || 240, height = picture.naturalHeight || 320;
+        const factor = Math.min(1, 480 / width, 420 / height), point = localPoint(e.clientX, e.clientY);
+        const extracted = { id: crypto.randomUUID(), type: "image", assetId: face.assetId, name: face.title || "Изображение", width: width * factor, height: height * factor, scale: 1, tilt: 0, x: point.x - width * factor / 2, y: point.y - height * factor / 2 };
+        face.assetId = null; notes.push(extracted); addElement(extracted); renderFlipCard(note, el); selectNote(extracted); save();
+      };
+      imageSlot.addEventListener("pointermove", move);
+      imageSlot.addEventListener("pointerup", end);
+      imageSlot.addEventListener("pointercancel", end);
+    });
     shell.querySelector("[data-card-flip]").onclick = () => flipCard(note,el);
     renderFlipCard(note,el);
   }
+  function layoutTable(note, el) {
+    const grid = el.querySelector(".table-grid");
+    grid.style.gridTemplateColumns = note.table.columns.map(n => n + "px").join(" ");
+    grid.style.gridTemplateRows = note.table.rows.map(n => n + "px").join(" ");
+    let offset = 0;
+    el.querySelectorAll('.table-divider[data-axis="col"]').forEach((handle, index) => { offset += note.table.columns[index]; handle.style.left = offset + "px"; });
+    offset = 0;
+    el.querySelectorAll('.table-divider[data-axis="row"]').forEach((handle, index) => { offset += note.table.rows[index]; handle.style.top = offset + "px"; });
+    offset = 0;
+    el.querySelectorAll('.table-add[data-axis="col"]').forEach((button, index) => { if (index) offset += note.table.columns[index-1]; button.style.left = offset + "px"; });
+    offset = 0;
+    el.querySelectorAll('.table-add[data-axis="row"]').forEach((button, index) => { if (index) offset += note.table.rows[index-1]; button.style.top = offset + "px"; });
+    note.width = note.table.columns.reduce((a,b) => a+b, 0);
+    note.height = note.table.rows.reduce((a,b) => a+b, 0);
+    positionNote(note, el);
+    if (selection.has(note.id)) { drawTextSelection(); placePalette(); }
+  }
+  function tableCellsFit(note, grid) {
+    return [...grid.children].every(cell => !note.table.cells[Number(cell.dataset.row)][Number(cell.dataset.col)] || cell.scrollHeight <= cell.clientHeight + 1);
+  }
+  function resizeTableEdge(g, dx, dy) {
+    const note = g.note, el = noteElements.get(note.id), horizontal = g.corner === "w" || g.corner === "e";
+    const source = horizontal ? g.tableColumns : g.tableRows;
+    const target = horizontal ? note.table.columns : note.table.rows;
+    const min = horizontal ? minTableColumn : minTableRow;
+    const signed = (horizontal ? dx : dy) / (camera.scale * note.scale) * (g.corner === "w" || g.corner === "n" ? -1 : 1);
+    const lower = Math.max(...source.map(v => (min - v) * source.length));
+    const upper = Math.min(...source.map(v => (100000 - v) * source.length));
+    const delta = limit(signed, lower, upper);
+    const grid = el.querySelector(".table-grid");
+    const fits = amount => {
+      source.forEach((value, index) => { target[index] = value + amount / source.length; });
+      grid.style[horizontal ? "gridTemplateColumns" : "gridTemplateRows"] = target.map(v => v + "px").join(" ");
+      return tableCellsFit(note, grid);
+    };
+    let accepted = delta;
+    if (delta < 0 && !fits(delta)) {
+      let lo = delta, hi = 0;
+      for (let i = 0; i < 10; i++) { const mid = (lo + hi) / 2; if (fits(mid)) hi = mid; else lo = mid; }
+      accepted = hi;
+    }
+    source.forEach((value, index) => { target[index] = value + accepted / source.length; });
+    if (horizontal && g.corner === "w") note.x = g.x + g.tableColumns.reduce((a,b)=>a+b,0) * note.scale - target.reduce((a,b)=>a+b,0) * note.scale;
+    if (!horizontal && g.corner === "n") note.y = g.y + g.tableRows.reduce((a,b)=>a+b,0) * note.scale - target.reduce((a,b)=>a+b,0) * note.scale;
+    layoutTable(note, el);
+  }
+  function renderTable(note, el) {
+    el.querySelectorAll(".table-grid,.table-divider,.table-add").forEach(child => child.remove());
+    const grid = document.createElement("div"); grid.className = "table-grid";
+    grid.style.setProperty("--table-border-color", note.table.borderColor);
+    grid.style.setProperty("--table-border-width", note.table.borderWidth + "px");
+    note.table.cells.forEach((row, r) => row.forEach((value, c) => {
+      const cell = document.createElement("div"); cell.className = "table-cell";
+      cell.dataset.row = r; cell.dataset.col = c; cell.textContent = value;
+      cell.classList.toggle("active", note.table.activeRow === r && note.table.activeCol === c);
+      grid.append(cell);
+    }));
+    grid.onpointerdown = event => {
+      const cell = event.target.closest(".table-cell");
+      if (!cell) return;
+      note.table.activeRow = Number(cell.dataset.row); note.table.activeCol = Number(cell.dataset.col);
+      grid.querySelectorAll(".table-cell.active").forEach(item => item.classList.remove("active"));
+      cell.classList.add("active");
+      el.querySelectorAll(".table-add").forEach(button => {
+        const selectedIndex = button.dataset.axis === "col" ? note.table.activeCol : note.table.activeRow;
+        button.classList.toggle("near-active", Number(button.dataset.index) === selectedIndex || Number(button.dataset.index) === selectedIndex + 1);
+      });
+    };
+    el.ondblclick = event => {
+      const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest(".table-cell");
+      if (!cell || !grid.contains(cell) || cell.querySelector("textarea")) return;
+      event.preventDefault(); event.stopPropagation(); selectNote(note);
+      const r = Number(cell.dataset.row), c = Number(cell.dataset.col), field = document.createElement("textarea");
+      field.value = note.table.cells[r][c]; field.setAttribute("aria-label", `Строка ${r+1}, столбец ${c+1}`);
+      cell.textContent = ""; cell.append(field); field.focus();
+      const fitEditor = () => {
+        field.style.height = "1px";
+        const style = getComputedStyle(cell);
+        const needed = Math.ceil(field.scrollHeight + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) + 2);
+        field.style.height = "100%";
+        if (needed > note.table.rows[r]) { note.table.rows[r] = needed; layoutTable(note, el); }
+      };
+      fitEditor();
+      field.addEventListener("input", () => { note.table.cells[r][c] = field.value; fitEditor(); saveSoon(); });
+      field.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); field.blur(); } });
+      field.addEventListener("blur", () => { note.table.cells[r][c] = field.value; cell.textContent = field.value; save(); }, { once:true });
+    };
+    el.prepend(grid);
+    for (const [axis, lengths] of [["col", note.table.columns], ["row", note.table.rows]]) {
+      for (let index = 0; index < lengths.length - 1; index++) {
+        const handle = document.createElement("div"); handle.className = "table-divider";
+        handle.dataset.axis = axis; handle.dataset.index = index;
+        handle.addEventListener("pointerdown", event => {
+          if (event.button !== 0 || note.locked) return;
+          event.preventDefault(); event.stopPropagation(); document.activeElement?.blur(); selectNote(note);
+          const start = axis === "col" ? event.clientX : event.clientY;
+          const first = lengths[index], second = lengths[index+1], min = axis === "col" ? minTableColumn : minTableRow;
+          handle.setPointerCapture(event.pointerId);
+          const move = e => {
+            if (e.pointerId !== event.pointerId) return;
+            const delta = ((axis === "col" ? e.clientX : e.clientY) - start) / (camera.scale * note.scale);
+            const grid = el.querySelector(".table-grid");
+            const candidate = limit(first + delta, min, first + second - min);
+            const fits = value => {
+              lengths[index] = value; lengths[index+1] = first + second - value;
+              grid.style[axis === "col" ? "gridTemplateColumns" : "gridTemplateRows"] = lengths.map(v => v + "px").join(" ");
+              return tableCellsFit(note, grid);
+            };
+            const previous = lengths[index];
+            if (!fits(candidate)) {
+              let safe = previous, blocked = candidate;
+              for (let i = 0; i < 10; i++) { const mid = (safe + blocked) / 2; if (fits(mid)) safe = mid; else blocked = mid; }
+              fits(safe);
+            }
+            layoutTable(note, el);
+          };
+          const end = e => {
+            if (e.pointerId !== event.pointerId) return;
+            handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", end); handle.removeEventListener("pointercancel", end);
+            if (e.type === "pointerup") { layoutTable(note, el); save(); }
+            else { lengths[index] = first; lengths[index+1] = second; layoutTable(note, el); }
+          };
+          handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", end); handle.addEventListener("pointercancel", end);
+        });
+        el.insertBefore(handle, el.querySelector(".note-corners"));
+      }
+      for (let index = 0; index <= lengths.length; index++) {
+        const button = document.createElement("button"); button.type = "button"; button.className = "table-add";
+        button.dataset.axis = axis; button.dataset.index = index; button.textContent = "+";
+        const selectedIndex = axis === "col" ? note.table.activeCol : note.table.activeRow;
+        button.classList.toggle("near-active", Number.isInteger(selectedIndex) && (index === selectedIndex || index === selectedIndex + 1));
+        button.title = axis === "col" ? "Вставить столбец" : "Вставить строку";
+        button.setAttribute("aria-label", button.title);
+        button.addEventListener("pointerdown", event => event.stopPropagation());
+        button.addEventListener("click", event => { event.stopPropagation(); selectNote(note); editTableStructure(note, axis === "col" ? "add-col" : "add-row", index); });
+        el.append(button);
+      }
+    }
+    layoutTable(note, el);
+  }
+  function editTableStructure(note, action, index) {
+    if (!isTable(note)) return;
+    const { columns, rows, cells } = note.table;
+    if (action === "add-col" && columns.length < 50) { index = limit(index, 0, columns.length); columns.splice(index, 0, columns[Math.min(index, columns.length-1)]); cells.forEach(row => row.splice(index, 0, "")); }
+    else if (action === "add-row" && rows.length < 50) { index = limit(index, 0, rows.length); rows.splice(index, 0, rows[Math.min(index, rows.length-1)]); cells.splice(index, 0, columns.map(() => "")); }
+    else if (action === "remove-col" && columns.length > 1) { index = limit(index, 0, columns.length-1); columns.splice(index, 1); cells.forEach(row => row.splice(index, 1)); }
+    else if (action === "remove-row" && rows.length > 1) { index = limit(index, 0, rows.length-1); rows.splice(index, 1); cells.splice(index, 1); }
+    else if (action === "equal-col") { const width = columns.reduce((a,b) => a+b, 0) / columns.length; columns.fill(width); }
+    else if (action === "equal-row") { const height = rows.reduce((a,b) => a+b, 0) / rows.length; rows.fill(height); }
+    else return;
+    if (Number.isInteger(note.table.activeRow)) note.table.activeRow = Math.min(note.table.activeRow, rows.length-1);
+    if (Number.isInteger(note.table.activeCol)) note.table.activeCol = Math.min(note.table.activeCol, columns.length-1);
+    renderTable(note, noteElements.get(note.id)); paletteMetrics = null; placePalette(); save();
+  }
+  function renderImageStyle(note, el) {
+    const viewport = el.querySelector(".image-viewport"), img = viewport?.querySelector("img");
+    if (!viewport || !img) return;
+    const mask = imageCropSession?.note === note ? {shape:"original",crop:{x:0,y:0,w:1,h:1}} : imageMask(note);
+    const stroke = imageStroke(note), crop = mask.crop;
+    img.style.width = 100 / crop.w + "%"; img.style.height = 100 / crop.h + "%";
+    img.style.left = -100 * crop.x / crop.w + "%"; img.style.top = -100 * crop.y / crop.h + "%";
+    viewport.style.borderRadius = mask.shape === "circle" && imageCropSession?.note !== note ? "50%" : stroke.radius + "px";
+    viewport.style.setProperty("--image-stroke-color", stroke.color);
+    viewport.style.setProperty("--image-stroke-width", stroke.width + "px");
+    viewport.style.setProperty("--image-stroke-style", stroke.style);
+    viewport.style.setProperty("--image-stroke-opacity", stroke.opacity);
+  }
+  function buildImage(note, el) {
+    const viewport = document.createElement("div"); viewport.className = "image-viewport";
+    const img = document.createElement("img"); img.alt = note.name || "Изображение"; img.draggable = false;
+    viewport.append(img); el.append(viewport); renderImageStyle(note, el);
+    readImageAsset(note.assetId).then(blob => {
+      if (!blob || !el.isConnected) { if (!blob) img.alt = "Файл изображения недоступен"; return; }
+      const url = URL.createObjectURL(blob);
+      img.onload = img.onerror = () => URL.revokeObjectURL(url);
+      img.src = url;
+    }).catch(() => { img.alt = "Не удалось загрузить изображение"; });
+  }
+  function applyImageMask(note, shape, crop) {
+    const el = noteElements.get(note.id), source = imageSourceSize(note);
+    note.imageSourceWidth = source.width; note.imageSourceHeight = source.height;
+    if (!crop) {
+      const ratio = {circle:1,square:1,portrait:3/4,landscape:4/3,wide:16/9}[shape];
+      if (!ratio) crop = {x:0,y:0,w:1,h:1};
+      else {
+        const sourceRatio = source.width / source.height;
+        const w = Math.min(1, ratio / sourceRatio), h = Math.min(1, sourceRatio / ratio);
+        crop = {x:(1-w)/2,y:(1-h)/2,w,h};
+      }
+    }
+    const oldWidth = note.width, oldHeight = note.height;
+    note.mask = {shape,crop};
+    note.width = source.width * crop.w; note.height = source.height * crop.h;
+    note.x += (oldWidth - note.width) * note.scale / 2;
+    note.y += (oldHeight - note.height) * note.scale / 2;
+    positionNote(note, el); renderImageStyle(note, el); drawTextSelection(); placePalette(); save();
+  }
+  function closeImageCrop(apply = false) {
+    const session = imageCropSession;
+    if (!session) return;
+    const {note,old,crop} = session, el = noteElements.get(note.id);
+    imageCropSession = null;
+    el?.querySelector(".image-crop-overlay")?.remove(); el?.classList.remove("image-cropping");
+    if (apply) {
+      note.width = old.width; note.height = old.height; note.x = old.x; note.y = old.y;
+      applyImageMask(note,"custom",crop);
+    } else {
+      Object.assign(note,old); positionNote(note,el); renderImageStyle(note,el); drawTextSelection(); placePalette();
+    }
+    $("image-crop-apply").hidden = $("image-crop-cancel").hidden = true;
+    $("image-mask").hidden = $("image-stroke").hidden = false;
+  }
+  function startImageCrop(note) {
+    if (imageCropSession) closeImageCrop(false);
+    const el = noteElements.get(note.id), source = imageSourceSize(note), crop = structuredClone(imageMask(note).crop);
+    imageCropSession = {note,crop,old:{x:note.x,y:note.y,width:note.width,height:note.height,mask:note.mask}};
+    note.x += (note.width - source.width) * note.scale / 2;
+    note.y += (note.height - source.height) * note.scale / 2;
+    note.width = source.width; note.height = source.height;
+    positionNote(note,el); renderImageStyle(note,el); el.classList.add("image-cropping");
+    const overlay = document.createElement("div"); overlay.className = "image-crop-overlay";
+    overlay.addEventListener("pointerdown", event => { if (event.target === overlay) { event.preventDefault(); event.stopPropagation(); } });
+    const box = document.createElement("div"); box.className = "image-crop-box";
+    box.innerHTML = ["nw","n","ne","e","se","s","sw","w"].map(edge => `<span class="image-crop-handle" data-edge="${edge}"></span>`).join("");
+    overlay.append(box); el.querySelector(".image-viewport").append(overlay);
+    const paint = () => { box.style.left=crop.x*100+"%"; box.style.top=crop.y*100+"%"; box.style.width=crop.w*100+"%"; box.style.height=crop.h*100+"%"; };
+    paint();
+    box.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      const edge = event.target.dataset.edge || "move", start = {...crop}, sx = event.clientX, sy = event.clientY;
+      box.setPointerCapture(event.pointerId);
+      const move = e => {
+        if (e.pointerId !== event.pointerId) return;
+        const rect = el.getBoundingClientRect(), dx = (e.clientX-sx)/rect.width, dy = (e.clientY-sy)/rect.height;
+        if (edge === "move") { crop.x=limit(start.x+dx,0,1-start.w); crop.y=limit(start.y+dy,0,1-start.h); }
+        else {
+          if (edge.includes("w")) { const x=limit(start.x+dx,0,start.x+start.w-.05); crop.x=x; crop.w=start.w+start.x-x; }
+          if (edge.includes("e")) crop.w=limit(start.w+dx,.05,1-start.x);
+          if (edge.includes("n")) { const y=limit(start.y+dy,0,start.y+start.h-.05); crop.y=y; crop.h=start.h+start.y-y; }
+          if (edge.includes("s")) crop.h=limit(start.h+dy,.05,1-start.y);
+        }
+        paint();
+      };
+      const end = e => { if (e.pointerId !== event.pointerId) return; box.removeEventListener("pointermove",move); box.removeEventListener("pointerup",end); box.removeEventListener("pointercancel",end); };
+      box.addEventListener("pointermove",move); box.addEventListener("pointerup",end); box.addEventListener("pointercancel",end);
+    });
+    $("image-crop-apply").hidden = $("image-crop-cancel").hidden = false;
+    $("image-mask").hidden = $("image-stroke").hidden = true;
+    drawTextSelection(); placePalette();
+  }
   function addElement(note) {
     const el = document.createElement("article");
-    el.className = isFlipCard(note) ? "note flip-card" : isCounter(note) ? "note counter-card" : isRpg(note) ? "note rpg-card" : isText(note) ? "note text-area" : isWallet(note) ? "note wallet-card" : isImage(note) ? "note image-card" : "note";
+    el.className = isTable(note) ? "note table-card" : isFlipCard(note) ? "note flip-card" : isCounter(note) ? "note counter-card" : isRpg(note) ? "note rpg-card" : isText(note) ? "note text-area" : isWallet(note) ? "note wallet-card" : isImage(note) ? "note image-card" : "note";
     el.tabIndex = 0;
     el.dataset.id = note.id;
     el.style.setProperty("--tilt", note.tilt + "deg");
@@ -615,7 +970,8 @@
     else if (!isScalable(note)) el.style.setProperty("--paper", papers[note.color][0]);
     positionNote(note, el);
     if (isScalable(note)) {
-      if (isFlipCard(note)) buildFlipCard(note, el);
+      if (isTable(note)) renderTable(note, el);
+      else if (isFlipCard(note)) buildFlipCard(note, el);
       else if (isRpg(note)) rpgRefresh.set(note.id, RpgTracker.mount(el, note.tracker, (action, before) => {
         if (action?.type !== "undo") recordCharacterAction(note, before);
         if (action?.type === "name") notes.filter(isCounter).forEach(n => counterRefresh.get(n.id)?.());
@@ -640,21 +996,10 @@
         saveSoon();
       }));
       else if (isWallet(note)) buildWallet(note, el);
-      else {
-        const img = document.createElement("img");
-        img.alt = note.name || "Изображение";
-        img.draggable = false;
-        el.append(img);
-        readImageAsset(note.assetId).then(blob => {
-          if (!blob || !el.isConnected) { if (!blob) img.alt = "Файл изображения недоступен"; return; }
-          const url = URL.createObjectURL(blob);
-          img.onload = img.onerror = () => URL.revokeObjectURL(url);
-          img.src = url;
-        }).catch(() => { img.alt = "Не удалось загрузить изображение"; });
-      }
+      else if (isImage(note)) buildImage(note, el);
       const corners = document.createElement("div");
       corners.className = "note-corners";
-      corners.innerHTML = ["nw", "ne", "sw", "se"].map(c => `<span class="resize-handle" data-corner="${c}" title="Масштабировать элемент"></span>`).join("");
+      corners.innerHTML = ["nw", "ne", "sw", "se", ...(isTable(note) ? ["n", "s", "e", "w"] : [])].map(c => `<span class="resize-handle" ${c.length === 1 ? `data-edge="${c}"` : `data-corner="${c}"`} title="Масштабировать элемент"></span>`).join("");
       el.append(corners);
     } else {
       const body = document.createElement("div");
@@ -731,13 +1076,13 @@
   function applyLockState(note, el) {
     el.classList.toggle("locked", !!note.locked);
     for (const child of el.children) {
-      child.inert = !!note.locked && !((isWallet(note) && child.classList.contains("wallet-shell")) || (isRpg(note) && child.classList.contains("rpg-shell")) || (isCounter(note) && child.classList.contains("counter-shell")) || (isFlipCard(note) && child.classList.contains("flip-shell")));
+      child.inert = !!note.locked && !((isWallet(note) && child.classList.contains("wallet-shell")) || (isRpg(note) && child.classList.contains("rpg-shell")) || (isCounter(note) && child.classList.contains("counter-shell")) || (isFlipCard(note) && child.classList.contains("flip-shell")) || (isImage(note) && child.classList.contains("image-viewport")) || (isTable(note) && (child.classList.contains("table-grid") || child.classList.contains("table-add"))));
     }
   }
   function syncLockControls() {
     for (const bar of [palette, textToolbar, walletToolbar]) {
       for (const child of bar.children) {
-        child.inert = !!selected?.locked && !child.classList.contains("lock-element") && !(isFlipCard(selected) && child.id === "flip-controls");
+        child.inert = !!selected?.locked && !child.classList.contains("lock-element") && !(isFlipCard(selected) && child.id === "flip-controls") && !(isImage(selected) && child.id === "image-controls") && !(isTable(selected) && child.id === "table-controls");
       }
       const button = bar.querySelector(".lock-element");
       if (!button) continue;
@@ -773,7 +1118,17 @@
     }
     applyStackOrder(); placePalette(); save();
   }
+  function clearTableCellSelection(note) {
+    if (!isTable(note)) return;
+    note.table.activeRow = note.table.activeCol = null;
+    noteElements.get(note.id)?.querySelectorAll(".table-cell.active,.table-add.near-active").forEach(el => el.classList.remove("active", "near-active"));
+  }
+  document.addEventListener("pointerdown", event => {
+    if (isTable(selected) && !event.target.closest(".table-card,#wallet-toolbar")) clearTableCellSelection(selected);
+  }, true);
   function selectNote(note, additive = false) {
+    if (imageCropSession && imageCropSession.note !== note) closeImageCrop(false);
+    if (selected !== note) clearTableCellSelection(selected);
     const members = note ? notes.filter(n => n.id === note.id || (note.groupId && n.groupId === note.groupId)) : [];
     if (!additive) selection.clear();
     const remove = additive && members.every(n => selection.has(n.id));
@@ -790,9 +1145,23 @@
     $("wallet-appearance").open = false;
     $("wallet-appearance").hidden = !isWallet(note);
     $("flip-controls").hidden = !isFlipCard(note);
+    $("image-controls").hidden = !isImage(note);
+    $("image-mask").open = $("image-stroke").open = false;
+    $("table-controls").hidden = !isTable(note);
+    $("table-more").open = false;
+    walletToolbar.classList.toggle("table-toolbar", isTable(note));
     if (isFlipCard(note)) syncFlipControls(note);
-    walletToolbar.querySelector(".wallet-toolbar-label").textContent = isFlipCard(note) ? "Флип-карточка" : isCounter(note) ? "Счётчик" : isRpg(note) ? "Лист персонажа" : isImage(note) ? "Изображение" : "Кошелёк";
-    $("remove-wallet").title = $("remove-wallet").ariaLabel = isFlipCard(note) ? "Удалить флип-карточку" : isCounter(note) ? "Удалить счётчик" : isRpg(note) ? "Удалить лист персонажа" : isImage(note) ? "Удалить изображение" : "Удалить кошелёк";
+    if (isImage(note)) {
+      const stroke = imageStroke(note);
+      $("image-stroke-color").value = stroke.color;
+      $("image-stroke-width").value = stroke.width;
+      $("image-stroke-radius").value = stroke.radius;
+      $("image-stroke-opacity").value = Math.round(stroke.opacity * 100);
+      $("image-stroke-style").value = stroke.style;
+    }
+    if (isTable(note)) { $("table-border-color").value = note.table.borderColor; $("table-border-width").value = note.table.borderWidth; }
+    walletToolbar.querySelector(".wallet-toolbar-label").textContent = isTable(note) ? "Таблица" : isFlipCard(note) ? "Флип-карточка" : isCounter(note) ? "Счётчик" : isRpg(note) ? "Лист персонажа" : isImage(note) ? "Изображение" : "Кошелёк";
+    $("remove-wallet").title = $("remove-wallet").ariaLabel = isTable(note) ? "Удалить таблицу" : isFlipCard(note) ? "Удалить флип-карточку" : isCounter(note) ? "Удалить счётчик" : isRpg(note) ? "Удалить лист персонажа" : isImage(note) ? "Удалить изображение" : "Удалить кошелёк";
     syncLockControls();
     placePalette();
   }
@@ -843,17 +1212,18 @@
     $("note-tool").setAttribute("aria-pressed", String(next === "note"));
     $("flip-tool").setAttribute("aria-pressed", String(next === "flipcard"));
     $("text-tool").setAttribute("aria-pressed", String(next === "text"));
+    $("table-tool").setAttribute("aria-pressed", String(next === "table"));
     $("rpg-tool").setAttribute("aria-pressed", String(next === "rpg"));
     $("wallet-tool").setAttribute("aria-pressed", String(next === "wallet"));
     $("counter-tool").setAttribute("aria-pressed", String(next === "counter"));
     canvas.classList.toggle("placing", next === "note");
     canvas.classList.toggle("placing-text", next === "text");
-    canvas.classList.toggle("placing-wallet", next === "wallet" || next === "flipcard");
+    canvas.classList.toggle("placing-wallet", next === "wallet" || next === "flipcard" || next === "table");
     canvas.classList.toggle("placing-counter", next === "counter");
     const tip = $("placement-tip");
     tip.hidden = next === "select";
     tip.textContent = next === "rpg" ? "Нажмите на холст, чтобы добавить лист персонажа" : next === "text" ? "Нажмите, чтобы ввести текст, или потяните, чтобы задать ширину" :
-      next === "wallet" ? "Нажмите на холст, чтобы добавить кошелёк" : next === "counter" ? "Нажмите на холст, чтобы добавить счётчик" : next === "flipcard" ? "Нажмите на холст, чтобы добавить карточку" : "Нажмите на холст, чтобы добавить стикер";
+      next === "wallet" ? "Нажмите на холст, чтобы добавить кошелёк" : next === "counter" ? "Нажмите на холст, чтобы добавить счётчик" : next === "flipcard" ? "Нажмите на холст, чтобы добавить карточку" : next === "table" ? "Нажмите или потяните, чтобы создать таблицу" : "Нажмите на холст, чтобы добавить стикер";
     if (next !== "select") selectNote(null);
     setHelp(false);
   }
@@ -870,6 +1240,12 @@
   function createFlipCard(point) {
     const note = {id:crypto.randomUUID(),type:"flipcard",x:point.x-120,y:point.y-175,width:240,height:350,scale:1,tilt:0,flipped:false,
       front:{title:"",text:"",color:"yellow",assetId:null},back:{title:"",text:"",color:"yellow",assetId:null}};
+    notes.push(note); addElement(note); setTool("select"); selectNote(note); save();
+  }
+  function createTable(point, width = 480, height = 180) {
+    width = Math.max(3 * minTableColumn, width); height = Math.max(3 * minTableRow, height);
+    const note = normalizeTable({ id:crypto.randomUUID(), type:"table", x:point.x, y:point.y, tilt:0, scale:1,
+      table:{ columns:Array(3).fill(width/3), rows:Array(3).fill(height/3), cells:Array.from({length:3},()=>["","",""]), borderColor:"#b7bec6", borderWidth:1 } });
     notes.push(note); addElement(note); setTool("select"); selectNote(note); save();
   }
   function createText(point, width) {
@@ -918,6 +1294,7 @@
     if (isRpg(selected) && !window.confirm("Удалить лист персонажа? Все навыки, зелья, ресурсы и история действий будут удалены. Данные не сохранятся.")) return;
     if (isCounter(selected) && !window.confirm("Удалить счётчик? Все его блоки и значения будут удалены.")) return;
     if (isFlipCard(selected) && !window.confirm("Удалить флип-карточку? Текст и картинки обеих сторон будут удалены с доски.")) return;
+    if (isTable(selected) && !window.confirm("Удалить таблицу со всеми ячейками?")) return;
     const { id } = selected;
     selectNote(null);
     noteElements.get(id).remove();
@@ -967,18 +1344,16 @@
       save();
     });
     bar.append(button);
-    for (const [direction, label, arrow] of [
-      ["down", "На слой ниже", "M17 4v9m-3-3 3 3 3-3"],
-      ["up", "На слой выше", "M17 13V4m-3 3 3-3 3 3"],
-      ["back", "На задний план", "M17 4v9m-3-3 3 3 3-3"],
-      ["front", "На передний план", "M17 13V4m-3 3 3-3 3 3"]
+    for (const [direction, label] of [
+      ["down", "На слой ниже"], ["up", "На слой выше"],
+      ["back", "На задний план"], ["front", "На передний план"]
     ]) {
       const layerButton = document.createElement("button");
       layerButton.type = "button";
       layerButton.className = "layer-element";
       layerButton.title = label;
       layerButton.setAttribute("aria-label", label);
-      layerButton.innerHTML = '<svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 9h8v8H3zM7 17v4h9v-5"/><path d="' + arrow + '"/></svg>';
+      layerButton.innerHTML = layerIcon(direction);
       layerButton.addEventListener("mousedown", event => event.preventDefault());
       layerButton.addEventListener("click", () => changeLayer(direction));
       bar.append(layerButton);
@@ -1021,8 +1396,58 @@
   $("note-tool").onclick = () => setTool("note");
   $("flip-tool").onclick = () => setTool("flipcard");
   $("text-tool").onclick = () => setTool("text");
+  $("table-tool").onclick = () => setTool("table");
   $("rpg-tool").onclick = () => setTool("rpg");
   $("counter-tool").onclick = () => setTool("counter");
+  $("table-controls").addEventListener("click", event => {
+    const action = event.target.closest("button[data-table-action]")?.dataset.tableAction;
+    if (!action || !isTable(selected)) return;
+    if (action === "delete-table") { $("table-more").open = false; removeNote(); return; }
+    editTableStructure(selected, action, action.includes("col") ? selected.table.activeCol ?? selected.table.columns.length-1 : selected.table.activeRow ?? selected.table.rows.length-1);
+    $("table-more").open = false;
+  });
+  $("table-border-color").oninput = event => {
+    if (!isTable(selected)) return;
+    selected.table.borderColor = event.target.value;
+    noteElements.get(selected.id).querySelector(".table-grid").style.setProperty("--table-border-color", event.target.value);
+    saveSoon();
+  };
+  $("table-border-width").oninput = event => {
+    if (!isTable(selected)) return;
+    const width = Number(event.target.value);
+    if (!Number.isFinite(width) || width <= 0) return;
+    selected.table.borderWidth = limit(width, .5, 12);
+    noteElements.get(selected.id).querySelector(".table-grid").style.setProperty("--table-border-width", selected.table.borderWidth + "px");
+    saveSoon();
+  };
+  $("table-border-width").onchange = event => {
+    if (!isTable(selected)) return;
+    event.target.value = selected.table.borderWidth;
+    save();
+  };
+  $("image-mask").addEventListener("click", event => {
+    const shape = event.target.closest("button[data-image-mask]")?.dataset.imageMask;
+    if (!shape || !isImage(selected)) return;
+    $("image-mask").open = false;
+    if (shape === "custom") startImageCrop(selected);
+    else applyImageMask(selected,shape);
+  });
+  $("image-crop-apply").onclick = () => closeImageCrop(true);
+  $("image-crop-cancel").onclick = () => closeImageCrop(false);
+  for (const id of ["image-stroke-color","image-stroke-width","image-stroke-radius","image-stroke-opacity","image-stroke-style"]) {
+    $(id).addEventListener("input", () => {
+      if (!isImage(selected)) return;
+      const stroke = imageStroke(selected);
+      stroke.color = $("image-stroke-color").value;
+      stroke.width = limit(Number($("image-stroke-width").value) || 0,0,30);
+      stroke.radius = limit(Number($("image-stroke-radius").value) || 0,0,200);
+      stroke.opacity = limit(Number($("image-stroke-opacity").value)/100,.05,1);
+      stroke.style = $("image-stroke-style").value;
+      selected.stroke = stroke;
+      renderImageStyle(selected,noteElements.get(selected.id)); saveSoon();
+    });
+    $(id).addEventListener("change", () => { if (isImage(selected)) save(); });
+  }
   $("wallet-tool").onclick = () => setTool("wallet");
   const flipColors = $("flip-colors");
   for (const [key,[hex,label]] of Object.entries(papers)) {
@@ -1123,21 +1548,75 @@
     });
   });
   const contextMenu = $("context-menu");
+  for (const [action,direction] of [["layerDown","down"],["layerUp","up"],["layerBack","back"],["layerFront","front"]]) {
+    contextMenu.querySelector(`[data-action="${action}"]`).innerHTML = layerIcon(direction);
+  }
   function closeContextMenu() { contextMenu.hidden = true; }
-  function copySelection(cut = false) {
+  function readBoardClipboard(text) {
+    if (!text?.startsWith(boardClipboardPrefix)) return null;
+    try {
+      const data = JSON.parse(text.slice(boardClipboardPrefix.length));
+      const items = Array.isArray(data) ? data : data?.items;
+      if (!Array.isArray(items) || items.length < 1 || items.length > 100 || !items.every(n =>
+        validNote(n) && [undefined,"text","wallet","image","rpg","counter","flipcard","table"].includes(n.type))) return null;
+      const bounds = Array.isArray(data?.bounds) && data.bounds.length === items.length && data.bounds.every(b =>
+        b && [b.x,b.y,b.width,b.height].every(Number.isFinite) && b.width >= 0 && b.height >= 0) ? data.bounds : null;
+      return {items,bounds};
+    } catch { return null; }
+  }
+  function copySelection(cut = false, clipboardData = null) {
     const chosen = notes.filter(n => selection.has(n.id));
-    if (!chosen.length || cut && chosen.some(n => n.locked)) return;
+    if (!chosen.length || cut && chosen.some(n => n.locked)) return false;
     copiedItems = JSON.parse(JSON.stringify(chosen));
+    copiedBounds = chosen.map(itemBounds);
+    const payload = boardClipboardPrefix + JSON.stringify({items:copiedItems,bounds:copiedBounds});
+    if (clipboardData) clipboardData.setData("text/plain", payload);
+    else writeBoardClipboard(payload);
     if (cut) removeGroupSelection();
     closeContextMenu();
+    return true;
   }
-  function pasteSelection(point = lastPointerWorld || contextPoint || localPoint(viewport.left + viewport.width / 2, viewport.top + viewport.height / 2)) {
+  async function writeBoardClipboard(payload) {
+    try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(payload); return; } }
+    catch { /* Use a selected temporary field when clipboard access is restricted. */ }
+    const field = document.createElement("textarea");
+    field.value = payload; field.style.cssText = "position:fixed;left:-9999px;top:0";
+    document.body.append(field); field.select(); document.execCommand("copy"); field.remove();
+  }
+  function pasteSelection(point = lastPointerWorld || localPoint(viewport.left + viewport.width / 2, viewport.top + viewport.height / 2)) {
     if (!copiedItems?.length) return;
     finishEdit();
     const map = new Map(copiedItems.map(n => [n.id, crypto.randomUUID()]));
-    const minX = Math.min(...copiedItems.map(n => n.x)), minY = Math.min(...copiedItems.map(n => n.y));
-    const copies = copiedItems.map(item => ({ ...JSON.parse(JSON.stringify(item)), id: map.get(item.id), x: item.x + point.x - minX + 24, y: item.y + point.y - minY + 24, groupId: item.groupId ? map.get(copiedItems.find(n => n.groupId === item.groupId)?.id) || undefined : undefined }));
-    notes.push(...copies); copies.forEach(addElement); applyStackOrder(); selectNote(copies[0]); closeContextMenu(); save();
+    const groupMap = new Map(copiedItems.filter(n => n.groupId).map(n => [n.groupId, crypto.randomUUID()]));
+    const bounds = copiedBounds?.length === copiedItems.length ? copiedBounds : copiedItems.map(item => {
+      if (noteElements.has(item.id)) return itemBounds(item);
+      if (isScalable(item)) return {x:item.x,y:item.y,width:item.width*item.scale,height:item.height*item.scale};
+      return {x:item.x,y:item.y,width:isText(item) ? item.width : item.size,height:isText(item) ? item.height : item.size};
+    });
+    const minX = Math.min(...bounds.map(b => b.x)), minY = Math.min(...bounds.map(b => b.y));
+    const maxX = Math.max(...bounds.map(b => b.x+b.width)), maxY = Math.max(...bounds.map(b => b.y+b.height));
+    const shiftX = point.x - (minX+maxX)/2, shiftY = point.y - (minY+maxY)/2;
+    const copies = copiedItems.map(item => ({ ...JSON.parse(JSON.stringify(item)), id:map.get(item.id), x:item.x+shiftX, y:item.y+shiftY, groupId:item.groupId ? groupMap.get(item.groupId) : undefined }));
+    notes.push(...copies); copies.forEach(addElement); applyStackOrder(); selectNote(copies[0]);
+    for (const copy of copies.slice(1)) if (!selection.has(copy.id)) selectNote(copy, true);
+    closeContextMenu(); save();
+  }
+  async function pasteFromContextMenu() {
+    const point = contextPoint || lastPointerWorld || localPoint(viewport.left + viewport.width/2,viewport.top + viewport.height/2);
+    try {
+      const data = await navigator.clipboard.read();
+      for (const item of data) {
+        const textType = item.types.find(type => type === "text/plain");
+        if (textType) {
+          const parsed = readBoardClipboard(await (await item.getType(textType)).text());
+          if (parsed) { copiedItems = parsed.items; copiedBounds = parsed.bounds; pasteSelection(point); return; }
+        }
+        const imageType = item.types.find(type => type.startsWith("image/"));
+        if (imageType) { const blob = await item.getType(imageType); addImages([new File([blob],"Вставленное изображение",{type:imageType})],point); return; }
+      }
+      return;
+    } catch { /* Clipboard access may be unavailable in a local WebView. */ }
+    if (copiedItems?.length) pasteSelection(point);
   }
   function undoBoard() {
     finishEdit(); clearTimeout(saveTimer);
@@ -1151,7 +1630,7 @@
     const action = button.dataset.action; closeContextMenu();
     if (action === "copy") copySelection();
     else if (action === "cut") copySelection(true);
-    else if (action === "paste") pasteSelection();
+    else if (action === "paste") pasteFromContextMenu();
     else if (action === "delete") selection.size > 1 ? removeGroupSelection() : removeNote();
     else if (action.startsWith("layer")) changeLayer(({layerUp:"up",layerDown:"down",layerFront:"front",layerBack:"back"})[action]);
   });
@@ -1193,7 +1672,7 @@
       return;
     }
     const handle = event.target.closest(".resize-handle");
-    const action = pan ? "pan" : tool === "text" ? "createText" : tool === "rpg" ? "createRpg" : tool === "wallet" ? "createWallet" : tool === "counter" ? "createCounter" : tool === "flipcard" ? "createFlipCard" : tool === "note" ? "create" : handle ? "resize" : note ? "drag" : "background";
+    const action = pan ? "pan" : tool === "text" ? "createText" : tool === "table" ? "createTable" : tool === "rpg" ? "createRpg" : tool === "wallet" ? "createWallet" : tool === "counter" ? "createCounter" : tool === "flipcard" ? "createFlipCard" : tool === "note" ? "create" : handle ? "resize" : note ? "drag" : "background";
     if (action === "drag" && !selection.has(note.id)) selectNote(note);
     if (action === "drag" && notes.some(n => selection.has(n.id) && n.locked)) return;
     const baseSelection = event.shiftKey ? [...selection] : [];
@@ -1205,8 +1684,9 @@
     gesture.baseSelection = baseSelection;
     if (action === "drag" && selection.size > 1) gesture.members = snapshotSelection();
     if (action === "resize" && isScalable(note)) {
-      gesture.corner = handle.dataset.corner;
+      gesture.corner = handle.dataset.corner || handle.dataset.edge;
       gesture.startScale = note.scale;
+      if (isTable(note)) { gesture.tableColumns = [...note.table.columns]; gesture.tableRows = [...note.table.rows]; document.activeElement?.blur(); }
       event.preventDefault();
     } else if (action === "resize" && isText(note)) {
       gesture.edge = handle.dataset.edge || handle.dataset.corner;
@@ -1260,16 +1740,24 @@
       for (const n of found) for (const member of notes.filter(m => m.id === n.id || (n.groupId && m.groupId === n.groupId))) selection.add(member.id);
       selected = notes.find(n => selection.has(n.id)) || null;
       notes.forEach(n => noteElements.get(n.id).classList.toggle("selected", selection.has(n.id)));
+    } else if (g.action === "createTable") {
+      textOutline.hidden = false;
+      textOutline.style.transform = translate(Math.min(g.mouseX, event.clientX) - viewport.left, Math.min(g.mouseY, event.clientY) - viewport.top);
+      textOutline.style.width = Math.max(3 * minTableColumn * camera.scale, Math.abs(dx)) + "px";
+      textOutline.style.height = Math.max(3 * minTableRow * camera.scale, Math.abs(dy)) + "px";
     } else if (g.action === "createText") {
       textOutline.hidden = false;
       textOutline.style.transform = translate(Math.min(g.mouseX, event.clientX) - viewport.left, g.mouseY - viewport.top);
       textOutline.style.width = Math.max(minTextWidth * camera.scale, Math.abs(dx)) + "px";
       textOutline.style.height = defaultTextSize * 1.36 * camera.scale + "px";
+    } else if (g.action === "resize" && isTable(g.note) && g.corner.length === 1) {
+      resizeTableEdge(g, dx, dy);
     } else if (g.action === "resize" && isScalable(g.note)) {
       const note = g.note;
       const west = g.corner.includes("w"), north = g.corner.includes("n");
       const sx = dx / camera.scale * (west ? -1 : 1), sy = dy / camera.scale * (north ? -1 : 1);
-      note.scale = limit(g.startScale + (sx * note.width + sy * note.height) / (note.width ** 2 + note.height ** 2), isImage(note) ? .05 : .35, isImage(note) ? 10 : 3);
+      const delta = g.corner.length === 1 ? (g.corner === "n" || g.corner === "s" ? sy / note.height : sx / note.width) : (sx * note.width + sy * note.height) / (note.width ** 2 + note.height ** 2);
+      note.scale = limit(g.startScale + delta, isImage(note) || isTable(note) ? .05 : .35, isTable(note) ? 20 : isImage(note) ? 10 : 3);
       note.x = g.x + (west ? note.width * (g.startScale - note.scale) : 0);
       note.y = g.y + (north ? note.height * (g.startScale - note.scale) : 0);
       moveNote(note, noteElements.get(note.id));
@@ -1370,6 +1858,10 @@
       const width = dragged ? Math.max(minTextWidth, Math.abs(end.x - start.x)) :
         Math.min(defaultTextWidth, Math.max(minTextWidth, (canvas.clientWidth - 64) / camera.scale));
       createText({ x: dragged ? Math.min(start.x, end.x) : start.x, y: start.y }, width);
+    } else if (event.type === "pointerup" && g.action === "createTable") {
+      const start = g.startPoint, end = localPoint(event.clientX, event.clientY);
+      if (g.moving) createTable({x:Math.min(start.x,end.x),y:Math.min(start.y,end.y)}, Math.abs(end.x-start.x), Math.abs(end.y-start.y));
+      else createTable({x:start.x-240,y:start.y-90});
     } else if (event.type === "pointerup" && g.action === "create" && !g.moving) {
       createNote(localPoint(event.clientX, event.clientY));
     } else if (event.type === "pointerup" && g.action === "createRpg" && !g.moving) {
@@ -1432,13 +1924,7 @@
       }
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && ["KeyC", "KeyX", "KeyV"].includes(event.code)) {
-      event.preventDefault();
-      if (event.code === "KeyC") copySelection();
-      else if (event.code === "KeyX") copySelection(true);
-      else pasteSelection();
-      return;
-    }
+    if ((event.ctrlKey || event.metaKey) && ["KeyC", "KeyX", "KeyV"].includes(event.code)) return;
     if ((event.ctrlKey || event.metaKey) && event.code === "KeyZ") { event.preventDefault(); undoBoard(); return; }
     if ((event.ctrlKey || event.metaKey) && event.code === "KeyG") { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -1451,6 +1937,7 @@
     if (event.key === "Escape") { setTool("select"); selectNote(null); }
     if (event.code === "KeyN") setTool("note");
     if (event.code === "KeyT") setTool("text");
+    if (event.code === "KeyG") setTool("table");
     if (event.code === "KeyW") setTool("wallet");
     if (event.code === "KeyV") setTool("select");
     if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); removeNote(); }
@@ -1524,12 +2011,32 @@
   const imageCenter = () => localPoint(viewport.left + viewport.width / 2, viewport.top + viewport.height / 2);
   $("image-tool").onclick = () => { $("image-file").value = ""; $("image-file").click(); };
   $("image-file").onchange = event => addImages(event.target.files, imageCenter());
-  document.addEventListener("paste", event => {
+  document.addEventListener("copy", event => {
     if (event.target.closest("input,textarea,[contenteditable=true]")) return;
+    if (copySelection(false,event.clipboardData)) event.preventDefault();
+  });
+  document.addEventListener("cut", event => {
+    if (event.target.closest("input,textarea,[contenteditable=true]")) return;
+    if (copySelection(true,event.clipboardData)) event.preventDefault();
+  });
+  document.addEventListener("paste", event => {
+    const boardItems = readBoardClipboard(event.clipboardData?.getData("text/plain"));
+    if (event.target.closest("input,textarea,[contenteditable=true]")) {
+      if (boardItems) {
+        event.preventDefault();
+        const plain = boardItems.items.map(note => isTable(note) ? note.table.cells.map(row => row.join("\t")).join("\n") : typeof note.text === "string" ? note.text : "").filter(Boolean).join("\n");
+        const textField = event.target.matches("textarea,input[type=text],input[type=search],input[type=url],input[type=tel],input:not([type])");
+        if (plain && textField) {
+          event.target.setRangeText(plain,event.target.selectionStart,event.target.selectionEnd,"end");
+          event.target.dispatchEvent(new Event("input",{bubbles:true}));
+        } else if (plain && event.target.isContentEditable) document.execCommand("insertText",false,plain);
+      }
+      return;
+    }
+    if (boardItems) { event.preventDefault(); copiedItems = boardItems.items; copiedBounds = boardItems.bounds; pasteSelection(); return; }
     const files = Array.from(event.clipboardData?.items || []).filter(item => item.kind === "file" && item.type.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
-    if (!files.length) return;
-    event.preventDefault();
-    addImages(files, imageCenter());
+    if (files.length) { event.preventDefault(); addImages(files, lastPointerWorld || imageCenter()); }
+    else if (!event.clipboardData && copiedItems?.length) { event.preventDefault(); pasteSelection(); }
   });
   canvas.addEventListener("dragover", event => {
     if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
@@ -1548,8 +2055,10 @@
   const groupToolbar = document.createElement("div"); groupToolbar.id = "group-toolbar"; groupToolbar.hidden = true;
   const marquee = document.createElement("div"); marquee.id = "selection-marquee"; marquee.hidden = true;
   canvas.append(groupBox, groupToolbar, marquee);
-  for (const [label, action] of [["Сгруппировать",groupSelection],["Разгруппировать",ungroupSelection],["На слой ниже",()=>changeLayer("down")],["На слой выше",()=>changeLayer("up")],["На задний план",()=>changeLayer("back")],["На передний план",()=>changeLayer("front")],["Удалить",removeGroupSelection]]) {
-    const button = document.createElement("button"); button.textContent = label;
+  for (const [label, action, direction] of [["Сгруппировать",groupSelection],["Разгруппировать",ungroupSelection],["На слой ниже",()=>changeLayer("down"),"down"],["На слой выше",()=>changeLayer("up"),"up"],["На задний план",()=>changeLayer("back"),"back"],["На передний план",()=>changeLayer("front"),"front"],["Удалить",removeGroupSelection]]) {
+    const button = document.createElement("button");
+    button.innerHTML = direction ? layerIcon(direction) : label;
+    if (direction) { button.className = "layer-element"; button.title = label; button.setAttribute("aria-label",label); }
     button.onmousedown = e => e.preventDefault(); button.onclick = action; groupToolbar.append(button);
   }
   function itemBounds(note) {
@@ -1607,8 +2116,8 @@
   });
   function previewGroupResize(g,dx,dy) {
     const b=g.bounds, west=g.corner.includes("w"), north=g.corner.includes("n");
-    const minFactor=Math.max(...g.members.map(m=>isScalable(m.note)?(isImage(m.note)?.05:.35)/m.scale:isText(m.note)?Math.max(minTextWidth/m.width,1/m.fontSize):minSize/m.size));
-    const maxFactor=Math.min(...g.members.map(m=>isScalable(m.note)?(isImage(m.note)?10:3)/m.scale:Infinity));
+    const minFactor=Math.max(...g.members.map(m=>isScalable(m.note)?(isImage(m.note)||isTable(m.note)?.05:.35)/m.scale:isText(m.note)?Math.max(minTextWidth/m.width,1/m.fontSize):minSize/m.size));
+    const maxFactor=Math.min(...g.members.map(m=>isScalable(m.note)?(isTable(m.note)?20:isImage(m.note)?10:3)/m.scale:Infinity));
     const k=limit(1+((west?-dx:dx)*b.width+(north?-dy:dy)*b.height)/(b.width*b.width+b.height*b.height),minFactor,maxFactor);
     g.factor=k;
     const ax=b.x+(west?b.width:0), ay=b.y+(north?b.height:0);
@@ -1631,10 +2140,9 @@
     }
   }
 
-  function boardSnapshot() {
-    document.activeElement?.blur();
-    finishEdit();
-    return JSON.parse(JSON.stringify({ version: 1, notes, camera, preferredColor, width: canvas.clientWidth, height: canvas.clientHeight }));
+  function boardSnapshot(quiet = false) {
+    if (!quiet) { document.activeElement?.blur(); finishEdit(); }
+    return JSON.parse(JSON.stringify({ version: 1, notes:storedNotes(), camera, preferredColor, width: canvas.clientWidth, height: canvas.clientHeight }));
   }
   function validBackupBoard(data) {
     try {
@@ -1645,7 +2153,7 @@
       }
     } catch { return false; }
     return data && data.version === 1 && Array.isArray(data.notes) && data.notes.every(n =>
-      validNote(n) && [undefined, "text", "wallet", "image", "rpg", "counter", "flipcard"].includes(n.type) &&
+      validNote(n) && [undefined, "text", "wallet", "image", "rpg", "counter", "flipcard", "table"].includes(n.type) &&
       (!isScalable(n) || (Number.isFinite(n.scale) && n.scale > 0 && Number.isFinite(n.width) && n.width > 0 && Number.isFinite(n.height) && n.height > 0)) &&
       (!isRpg(n) || (n.tracker && typeof n.tracker === "object" && Array.isArray(n.tracker.skills))) &&
       (!isCounter(n) || (n.counter && typeof n.counter === "object" && Array.isArray(n.counter.items))) &&
@@ -1682,11 +2190,12 @@
     location.reload();
   }
   ListokBackup.mount({ snapshot: boardSnapshot, readAsset: readImageAsset, validateBoard: validBackupBoard, restoreBoard: restoreBackup });
+  globalThis.ListokAutoBackup?.mount({ snapshot: () => boardSnapshot(true), readAsset: readImageAsset, validateBoard: validBackupBoard, restoreBoard: restoreBackup });
 
   const hasCamera = restore();
   notes.forEach(addElement);
   
   if (hasCamera) drawCamera(); else fit(true);
   if (notes.length) selectNote(notes[0]);
-  save();
+  if (lastStoredValue === null) save(); else lastSavedSnapshot = lastStoredValue;
 })();

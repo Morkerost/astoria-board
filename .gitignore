@@ -1,0 +1,7 @@
+/desktop/web/
+/desktop/dist/
+/desktop/.cargo-target/
+/desktop/.cargo-install/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/
+
