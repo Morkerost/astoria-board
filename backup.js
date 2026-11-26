@@ -4,7 +4,7 @@
   const magic = 'LISTOK01';
   const encoder = new TextEncoder();
   async function pack(board, readAsset) {
-    const ids = [...new Set(board.notes.filter(n => n.type === 'image').map(n => n.assetId))];
+    const ids = [...new Set(board.notes.flatMap(n => [n.type === 'image' ? n.assetId : null, n.front?.assetId, n.back?.assetId].filter(Boolean)))];
     const blobs = [], assets = []; let offset = 0;
     for (const id of ids) {
       const blob = await readAsset(id);
@@ -29,7 +29,7 @@
       if (typeof a.id !== 'string' || images.has(a.id) || !Number.isSafeInteger(a.size) || a.size <= 0 || a.offset !== offset || start + offset + a.size > file.size || typeof a.type !== 'string' || !a.type.startsWith('image/')) throw Error('Повреждён список картинок в копии.');
       images.set(a.id, file.slice(start + offset, start + offset + a.size, a.type)); offset += a.size;
     }
-    const required = new Set(manifest.board.notes.filter(n => n.type === 'image').map(n => n.assetId));
+    const required = new Set(manifest.board.notes.flatMap(n => [n.type === 'image' ? n.assetId : null, n.front?.assetId, n.back?.assetId].filter(Boolean)));
     if (start + offset !== file.size || required.size !== images.size || [...required].some(id => !images.has(id))) throw Error('В копии отсутствуют картинки или есть лишние данные.');
     return { board: manifest.board, images };
   }

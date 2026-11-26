@@ -7,7 +7,7 @@
   const caps = { small: 3, medium: 6, large: 9 };
   const clone = v => JSON.parse(JSON.stringify(v));
   function normalize(raw = {}) {
-    const s = { turn: integer(raw.turn), mode: raw.mode === 'dodge' ? 'dodge' : 'action', skills: [], potions: {}, resources: {}, history: [] };
+    const s = { name: String(raw.name || 'Персонаж').slice(0,64), turn: integer(raw.turn), mode: raw.mode === 'dodge' ? 'dodge' : 'action', skills: [], potions: {}, resources: {}, history: [] };
     s.skills = (Array.isArray(raw.skills) ? raw.skills : []).map((v, i) => ({ id: String(v.id || 'skill-' + i), name: String(v.name || 'Навык'), description: String(v.description || ''), source: String(v.source || ''), cooldown_type: types.includes(v.cooldown_type) ? v.cooldown_type : 'none', cooldown: integer(v.cooldown), remaining: integer(v.remaining) })).map(v => ({ ...v, remaining: v.cooldown_type === 'none' ? 0 : Math.min(v.remaining, v.cooldown_type === 'rest' ? 1 : v.cooldown) }));
     for (const size of sizes) for (const color of ['red', 'blue']) {
       const key = size + '-' + color, p = raw.potions?.[key] || {};
@@ -26,12 +26,14 @@
     const nextTurn = () => { s.turn++; s.skills.forEach(v => { if (v.cooldown_type === 'turns') v.remaining = Math.max(0, v.remaining - 1); }); };
     if (a.type === 'use') {
       const v = s.skills.find(v => v.id === a.id); if (!v || v.remaining) return false;
-      v.remaining = v.cooldown_type === 'rest' ? 1 : v.cooldown_type === 'none' ? 0 : v.cooldown;
+      // Advance the shared turn first. The skill being used starts its full cooldown after that turn.
       if (s.mode === 'action') nextTurn();
+      v.remaining = v.cooldown_type === 'rest' ? 1 : v.cooldown_type === 'none' ? 0 : v.cooldown;
     } else if (a.type === 'turn') nextTurn();
     else if (a.type === 'day') { s.skills.forEach(v => { if (v.cooldown_type === 'days') v.remaining = Math.max(0, v.remaining - 1); }); Object.values(s.potions).forEach(p => p.drunk = 0); }
     else if (a.type === 'rest') { s.turn = 0; s.skills.forEach(v => { if (v.cooldown_type === 'rest') v.remaining = 0; }); }
     else if (a.type === 'mode') s.mode = a.value === 'dodge' ? 'dodge' : 'action';
+    else if (a.type === 'name') s.name = String(a.value || 'Персонаж').slice(0,64);
     else if (a.type === 'skill') {
       const old = s.skills.find(v => v.id === a.skill.id);
       const v = normalize({ skills: [a.skill] }).skills[0];
@@ -57,25 +59,23 @@
       if (!['adrenaline', 'temporary', 'rage'].includes(key) || s.resources[key] < cost) return false;
       s.resources[key] -= cost;
     } else return false;
-    if (JSON.stringify(before) === JSON.stringify({ ...s, history: undefined })) return false;
+    if (a.type !== 'day' && JSON.stringify(before) === JSON.stringify({ ...s, history: undefined })) return false;
     s.history.push(before); if (s.history.length > 50) s.history.shift(); return true;
   }
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const cooldown = v => v.cooldown_type === 'rest' ? 'До отдыха' : v.cooldown_type === 'none' ? 'Без отката' : v.cooldown + (v.cooldown_type === 'turns' ? ' х.' : ' сут.');
-  function mount(root, state, onChange) {
+  function mount(root, state, onChange, beforeAction, undoLinked, canUndoLinked) {
     let editing = false, formId = null, size = 'small';
     const shell = document.createElement('div'); shell.className = 'rpg-shell'; root.append(shell);
     const button = (label, action, extra = '') => `<button type="button" data-action="${action}" ${extra}>${label}</button>`;
     const num = (label, value, attrs) => `<label>${label}<input type="number" min="0" max="999999" step="1" value="${value}" ${attrs}></label>`;
     function render() {
       const r = state.resources;
-      shell.innerHTML = `<header class="rpg-header"><div><small>ЛИСТ ПРИКЛЮЧЕНИЯ</small><h2>Навыки и ресурсы</h2></div><span class="rpg-turn">ХОД <b>${state.turn}</b></span></header>
+      shell.innerHTML = `<header class="rpg-header"><div><small>ЛИСТ ПЕРСОНАЖА</small><input class="rpg-character-name wallet-interactive" aria-label="Имя персонажа" value="${esc(state.name)}" maxlength="64"><span class="rpg-name-hint">Имя для подключения счётчиков</span></div><span class="rpg-turn">ХОД <b>${state.turn}</b></span></header>
       <div class="rpg-layout wallet-interactive"><section class="rpg-skills rpg-panel"><div class="rpg-section-head"><h3>${editing ? 'Редактор навыков' : 'Навыки'}</h3><div class="rpg-segment">${button('Действие', 'mode', `data-value="action" aria-pressed="${state.mode === 'action'}"`)}${button('Уклонение', 'mode', `data-value="dodge" aria-pressed="${state.mode === 'dodge'}"`)}</div></div>
       <div class="rpg-skill-scroll"><table><thead><tr><th>Навык / источник</th><th>Перезарядка</th><th>Статус</th><th></th></tr></thead><tbody>${state.skills.map(v => `<tr><td><span class="rpg-skill-name" tabindex="0">${esc(v.name)}<span class="rpg-tooltip" role="tooltip">${esc(v.description || 'Нет описания')}</span></span><small>${esc(v.source || 'Без источника')}</small></td><td>${cooldown(v)}</td><td><span class="rpg-status ${v.remaining ? 'waiting' : ''}">${!v.remaining ? 'ГОТОВ' : v.cooldown_type === 'rest' ? 'ДО ОТДЫХА' : v.remaining + (v.cooldown_type === 'days' ? ' сут.' : ' х.')}</span></td><td>${editing ? button('Изменить', 'editSkill', `data-id="${esc(v.id)}"`) + button('×', 'deleteSkill', `data-id="${esc(v.id)}" aria-label="Удалить навык"`) : button('Использовать', 'use', `data-id="${esc(v.id)}" ${v.remaining ? 'disabled' : ''}`)}</td></tr>`).join('')}</tbody></table>${!state.skills.length ? '<div class="rpg-empty"><span>✧</span><h3>Здесь начнётся приключение</h3><p>Добавьте навыки персонажа и предметов.<br>Перезарядки будут считаться автоматически.</p>' + button('+ Добавить навык', 'addSkill') + '</div>' : ''}</div>
-      <div class="rpg-footer">${editing ? button('+ Добавить навык', 'addSkill') + button('Готово', 'editor') : button('← Назад', 'undo', `${state.history.length ? '' : 'disabled'} title="Отменить последнее изменение (до 50 действий)"`) + button('Следующий ход →', 'turn') + button('Отдых', 'rest') + button('Следующий день', 'day') + button('Редактор', 'editor')}</div></section>
-      <aside class="rpg-sidebar"><section class="rpg-panel"><div class="rpg-section-head"><h3>Зелья</h3><small>Суточный запас</small></div><div class="rpg-segment rpg-tabs">${sizes.map((k,i) => button(['Малые','Средние','Большие'][i], 'size', `data-value="${k}" aria-pressed="${size === k}"`)).join('')}</div>${['red','blue'].map(color => { const key = size + '-' + color, p = state.potions[key]; return `<div class="rpg-potion ${color}"><div class="rpg-potion-top"><strong><i></i>${color === 'red' ? 'Красное' : 'Синее'}</strong>${num('Запас', p.stock, `data-potion="${key}" aria-label="Запас: ${color === 'red' ? 'красное' : 'синее'} зелье"`)}</div><div class="rpg-meter"><span style="width:${p.drunk / caps[size] * 100}%"></span></div><div class="rpg-potion-info"><span>Выпито <b>${p.drunk} / ${caps[size]}</b></span><span>Передано: ${p.given}</span></div><div class="rpg-potion-actions">${button('Выпить', 'potion', `data-key="${key}" data-operation="drink" ${!p.stock || p.drunk >= caps[size] ? 'disabled' : ''}`)}${button('Отдать', 'potion', `data-key="${key}" data-operation="give" ${!p.stock ? 'disabled' : ''}`)}${button('Принять', 'potion', `data-key="${key}" data-operation="receive" ${p.drunk >= caps[size] ? 'disabled' : ''} title="Выпить полученное зелье без изменения запаса"`)}</div></div>`; }).join('')}</section>
-      <section class="rpg-panel"><h3>Адреналин</h3><small>Постоянный</small><div class="rpg-resource">${num('Всего',r.adrenalineTotal,'data-resource="adrenalineTotal"')}${num('Осталось',r.adrenaline,'data-resource="adrenaline"')}${button('−1','spend',`data-key="adrenaline" ${r.adrenaline ? '' : 'disabled'} aria-label="Потратить постоянный адреналин"`)}</div><small>Временный</small><div class="rpg-resource">${num('Осталось',r.temporary,'data-resource="temporary"')}${button('−1','spend',`data-key="temporary" ${r.temporary ? '' : 'disabled'} aria-label="Потратить временный адреналин"`)}</div></section>
-      <section class="rpg-panel"><h3>Ярость</h3><div class="rpg-resource">${num('Всего',r.rageTotal,'data-resource="rageTotal"')}${num('Осталось',r.rage,'data-resource="rage"')}${button('−1','spend',`data-key="rage" ${r.rage ? '' : 'disabled'} aria-label="Потратить ярость"`)}</div><div class="rpg-madness">${button('Безумство · 2 ярости','spend',`data-key="madness" ${r.rage >= 2 ? '' : 'disabled'}`)}<input type="text" data-resource="madness" aria-label="Заметки о безумстве" placeholder="Заметки о безумстве" value="${esc(r.madness)}"></div></section></aside></div>`;
+      <div class="rpg-footer">${editing ? button('+ Добавить навык', 'addSkill') + button('Готово', 'editor') : button('← Назад', 'undo', `${state.history.length || canUndoLinked?.() ? '' : 'disabled'} title="Отменить последнее изменение (до 50 действий)"`) + button('Следующий ход →', 'turn') + button('Отдых', 'rest') + button('Следующий день', 'day') + button('Редактор', 'editor')}</div></section>
+      </div>`;
       if (formId !== null) renderForm();
     }
     function renderForm() {
@@ -89,7 +89,12 @@
       form.addEventListener('submit', event => { event.preventDefault(); const values = Object.fromEntries(new FormData(form)); if (!values.name.trim()) return; const id = formId || crypto.randomUUID(); formId = null; change({type:'skill', skill:{...values, name:values.name.trim(), id}}); });
       form.elements.name.focus({preventScroll:true});
     }
-    function change(a) { if (dispatch(state, a)) onChange(); render(); }
+    function change(a) {
+      if (a.type === 'undo' && undoLinked?.()) { render(); return; }
+      const before = a.type === 'undo' ? null : beforeAction?.(a);
+      if (dispatch(state, a)) onChange(a, before);
+      render();
+    }
     shell.addEventListener('click', e => {
       const b = e.target.closest('button[data-action]'); if (!b || b.disabled) return;
       const d = b.dataset;
@@ -100,18 +105,20 @@
       else change({type:d.action, id:d.id, value:d.value, key:d.key, operation:d.operation});
     });
     shell.addEventListener('change', e => {
-      const a = e.target.dataset.resource ? {type:'resource', key:e.target.dataset.resource, value:e.target.value} : e.target.dataset.potion ? {type:'potion', key:e.target.dataset.potion, operation:'stock', value:e.target.value} : null;
+      const a = e.target.classList.contains('rpg-character-name') ? {type:'name', value:e.target.value} : e.target.dataset.resource ? {type:'resource', key:e.target.dataset.resource, value:e.target.value} : e.target.dataset.potion ? {type:'potion', key:e.target.dataset.potion, operation:'stock', value:e.target.value} : null;
       if (!a) return;
-      if (dispatch(state, a)) onChange();
+      const before = beforeAction?.(a);
+      if (dispatch(state, a)) onChange(a, before);
       // Keep controls mounted on blur so the click following a stock edit is not lost.
       shell.querySelectorAll('[data-resource]').forEach(input => input.value = state.resources[input.dataset.resource]);
       shell.querySelectorAll('[data-potion]').forEach(input => input.value = state.potions[input.dataset.potion].stock);
       shell.querySelectorAll('[data-action=spend]').forEach(b => b.disabled = b.dataset.key === 'madness' ? state.resources.rage < 2 : !state.resources[b.dataset.key]);
       shell.querySelectorAll('[data-action=potion]').forEach(b => { const p = state.potions[b.dataset.key], op = b.dataset.operation; b.disabled = (op !== 'receive' && !p.stock) || (op !== 'give' && p.drunk >= caps[size]); });
-      const undo = shell.querySelector('[data-action=undo]'); if (undo) undo.disabled = !state.history.length;
+      const undo = shell.querySelector('[data-action=undo]'); if (undo) undo.disabled = !state.history.length && !canUndoLinked?.();
     });
     shell.addEventListener('keydown', e => { if (e.key === 'Escape' && formId !== null) { e.stopPropagation(); formId = null; render(); } });
     render();
+    return render;
   }
   const api = { normalize, dispatch, mount };
   if (typeof module !== 'undefined') module.exports = api; else globalThis.RpgTracker = api;

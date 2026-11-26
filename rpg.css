@@ -10,9 +10,13 @@
 .rpg-shell small { font-size:11px; color:#9caab9; }
 .rpg-header { height:89px; padding:20px 25px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #ffffff0d; cursor:grab; user-select:none; }
 .rpg-header small { letter-spacing:2px; color:#a4c7b2; font-size:10px; }
+.rpg-character-name { display:block; border:0!important; background:transparent!important; padding:0!important; width:280px; font-size:22px!important; font-weight:600!important; }
+.rpg-name-hint { display:block; font-size:10px; color:#8392a0; }
+.rpg-character-name { display:block; border:0!important; background:transparent!important; padding:0!important; width:280px; font-size:22px!important; font-weight:600!important; }
+.rpg-name-hint { display:block; font-size:10px; color:#8392a0; }
 .rpg-turn { display:flex; align-items:center; gap:14px; color:#9caab9; letter-spacing:1px; font-size:11px; }
 .rpg-turn b { font-size:31px; color:#d1e9d8; font-weight:500; letter-spacing:-1px; }
-.rpg-layout { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:14px; padding:18px; height:calc(100% - 89px); }
+.rpg-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; padding:18px; height:calc(100% - 89px); }
 .rpg-panel { background:#212a34; border:1px solid #ffffff08; border-radius:12px; padding:16px; }
 .rpg-section-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:15px; }
 .rpg-shell button { color:#dbe6ef; background:#303d4b; border:1px solid #ffffff0a; border-radius:6px; padding:7px 10px; font:inherit; font-size:12px; cursor:pointer; white-space:nowrap; }
@@ -81,3 +85,117 @@
 .rpg-form textarea { resize:vertical; }
 .rpg-form-buttons { display:flex; justify-content:flex-end; gap:8px; }
 .rpg-form button[type=submit] { background:#476653; }
+.note.counter-card { width:var(--wallet-width);height:var(--wallet-height);padding:0;background:#17222a;color:#eef4f5;transform-origin:0 0;border-radius:16px;box-shadow:0 14px 36px #14232a30; }
+.counter-card::before,.counter-card.selected::after { content:none; }
+.counter-card .note-corners { inset:0; }
+.counter-card .resize-handle { transform:translate(-50%,-50%) scale(calc(var(--handle-scale,1) * var(--wallet-inverse,1))); }
+.counter-shell {height:auto;display:flex;flex-direction:column;padding:20px;font:14px/1.4 'Segoe UI',sans-serif;overflow:visible;border-radius:16px;color-scheme:dark;user-select:text;}
+.counter-shell {position:relative;}
+.counter-head {display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:14px;border-bottom:1px solid #ffffff15;}
+.counter-head small {display:block;color:#91b9a0;font-size:9px;letter-spacing:1.5px;}
+.counter-head input {display:block;width:190px;margin-top:4px;border:0!important;background:transparent!important;padding:0!important;font-weight:600!important;font-size:20px!important;}
+.counter-head select,.counter-shell input,.counter-shell button {color:#e7edef;background:#2a3941;border:1px solid #ffffff15;border-radius:6px;padding:6px 8px;font:inherit;font-size:11px;}
+.counter-rows {flex:0 0 auto;overflow:visible;}
+.counter-row {display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid #ffffff12;}
+.counter-row>div:first-child>input {display:block;width:170px;background:transparent;border:0;font-weight:600;}
+.counter-row small {display:flex;align-items:center;gap:5px;color:#9daeb5;font-size:9px;margin:5px 0 0 7px;}
+.counter-row small select {max-width:126px;color:#bac8ce;background:#202d35;border:0;border-radius:4px;font-size:9px;}
+.counter-values {display:flex;align-items:center;gap:5px;}
+.counter-values b {min-width:23px;text-align:center;font-size:16px;}
+.counter-values span {font-size:10px;color:#94a6ad;}
+.counter-values button {min-width:28px;padding:4px;}
+.counter-values .counter-delete {border:0;background:transparent;color:#d49c9c;}
+.counter-shell button:disabled {opacity:.35;}
+.counter-shell button {cursor:pointer!important;}
+.counter-shell footer {position:static;display:flex;padding-top:12px;border-top:1px solid #ffffff12;pointer-events:auto;}
+.counter-shell footer button {pointer-events:auto;cursor:pointer!important;}
+#counter-picker {position:fixed;z-index:15;width:205px;padding:10px;border:1px solid #e2e4df;border-radius:11px;background:white;box-shadow:0 8px 28px #2223;}
+#counter-picker strong {display:block;font-size:12px;padding:4px 7px 8px;}
+#counter-picker button {display:block;width:100%;text-align:left;padding:8px;border-radius:6px;font-size:12px;}
+#counter-picker button:hover {background:#f1f2ec;}
+.counter-row {display:grid;grid-template-columns:minmax(0,1fr) auto;}
+.counter-potion-actions {grid-column:1/-1;display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-left:6px;}
+.counter-potion-actions small {width:100%;color:#9daeb5;font-size:10px;}
+.counter-potion-actions button {padding:4px 7px;font-size:10px;}
+.cb-row-head {grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+.cb-row-head input {font-weight:600;min-width:0;max-width:75%;background:#1b2830;}
+.cb-row-head .counter-delete {color:#d49c9c;}
+.cb-settings {grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;padding:3px 0;}
+.cb-settings label,.cb-chamber label {display:flex;align-items:center;gap:4px;color:#9daeb5;font-size:10px;}
+.cb-settings input {width:58px;}
+.cb-settings select,.cb-chamber select {max-width:120px;}
+.cb-ammo-list {grid-column:1/-1;display:grid;gap:5px;padding:8px;background:#1b2830;border-radius:7px;}
+.cb-ammo-list > div {display:flex;gap:4px;}
+.cb-ammo-list input:first-child {flex:1;min-width:0;}
+.cb-ammo-list input[type=number] {width:55px;}
+.cb-ammo-list > button,.cb-chamber button {cursor:pointer!important;}
+.cb-ammo-list small {color:#9daeb5;font-size:10px;}
+.cb-chamber {grid-column:1/-1;display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
+.cb-chamber span {font-size:10px;color:#a9c9b0;}
+.counter-new-type {max-width:160px;color:#e7edef;background:#2a3941;border:1px solid #ffffff15;border-radius:6px;padding:6px;font:inherit;font-size:11px;}
+.counter-head h3 {margin:4px 0 0;color:#e8f0f1;font-size:19px;}
+.counter-head [data-config] {cursor:pointer;background:#3d6252;color:#e4f2e8;}
+.counter-view-row {display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:14px 4px;border-bottom:1px solid #ffffff13;}
+.counter-view-title {display:grid;grid-template-columns:10px minmax(80px,1fr);align-items:center;column-gap:8px;flex:1;}
+.counter-view-title i {grid-row:span 2;width:9px;height:9px;border-radius:50%;background:var(--charge-color);}
+.counter-view-title strong {font-size:13px;color:#edf3f4;}
+.counter-view-title small {grid-column:2;color:#92a5ad;font-size:10px;margin-top:2px;}
+.counter-view-row .counter-values {gap:7px;}
+.counter-view-row .counter-values b {font-size:17px;}
+.counter-view-row > button,.counter-view-row .counter-potion-actions button {cursor:pointer!important;}
+.counter-view-ammo {display:flex;gap:9px;flex-wrap:wrap;color:#a9bdc1;font-size:10px;}
+.counter-view-ammo b {color:#eff4f3;}
+.counter-view-row label {display:flex;align-items:center;gap:4px;color:#92a5ad;font-size:10px;}
+.counter-choice-overlay {position:absolute;z-index:8;inset:0;display:grid;place-items:center;padding:16px;background:#0b1119d9;backdrop-filter:blur(5px);}
+.counter-choice-overlay section {position:relative;width:min(430px,100%);max-height:100%;overflow:auto;padding:23px;background:#24323b;border:1px solid #ffffff20;border-radius:14px;box-shadow:0 16px 50px #0007;}
+.counter-choice-overlay section>small {color:#9bc9aa;letter-spacing:1.2px;font-size:9px;}
+.counter-choice-overlay h3 {margin:6px 0 15px;color:#eff5f4;font-size:19px;}
+.counter-choices {display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.counter-choices button {display:grid;gap:4px;text-align:left;white-space:normal;padding:10px;background:#2e414a;}
+.counter-choices button b {font-size:12px;color:#edf4f2;}
+.counter-choices button small {font-size:10px;line-height:1.4;color:#a5b8bd;}
+.counter-choices button:hover {background:#3b565c;}
+.counter-choice-close {position:absolute;right:12px;top:12px;}
+.counter-chamber-loaded {font-size:10px;color:#a9c9b0;}
+.counter-view-row .counter-potion-actions {width:100%;margin:0;}
+.counter-view-row .counter-potion-actions button {flex:1;}
+.cb-cooldown-charges,.counter-cooldown-charges {display:flex;flex-wrap:wrap;gap:6px;}
+.cb-cooldown-charges>div,.counter-cooldown-charges>button {display:grid;justify-items:center;gap:3px;min-width:58px;padding:7px 9px;border:1px solid #ffffff18;border-radius:8px;background:#1b2830;color:#e7edef;}
+.cb-cooldown-charges small,.counter-cooldown-charges small {font-size:9px;color:#9daeb5;}
+.cb-cooldown-charges b,.counter-cooldown-charges b {font-size:11px;color:#9bc9aa;}
+.counter-cooldown-charges button {cursor:pointer!important;}
+.counter-cooldown-charges button:disabled {opacity:.7;cursor:default!important;}
+.cb-settings input[type=color] {width:40px;height:30px;padding:2px;cursor:pointer;}
+.counter-storage {grid-column:1/-1;display:grid;gap:7px;width:100%;padding:9px;background:#1b2830;border:1px solid #ffffff12;border-radius:9px;}
+.counter-storage>small {margin:0;color:#a8bec4;font-size:11px;}
+.counter-storage-entry {display:grid;grid-template-columns:minmax(0,1fr) 64px 28px;gap:5px;}
+.counter-storage-entry input {min-width:0;width:100%;}
+.counter-storage-entry button {padding:4px;}
+.counter-storage>button {justify-self:start;}
+.counter-weapon-panel {grid-column:1/-1;display:grid;gap:10px;width:100%;}
+.counter-ammo-legend,.counter-magazine,.counter-weapon-controls {display:grid;gap:7px;padding:10px;background:#1b2830;border:1px solid #ffffff12;border-radius:9px;}
+.counter-ammo-legend>b,.counter-magazine b,.counter-chamber b {font-size:11px;color:#dbe7e9;}
+.counter-ammo-type {display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;}
+.counter-ammo-type>span:nth-child(2) {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+.counter-ammo-type input[type=color] {width:32px;height:30px;padding:2px;flex:none;}
+.counter-ammo-type input:not([type=color]) {min-width:0;flex:1;}
+.counter-ammo-type input[type=number] {width:58px;flex:none;}
+.counter-ammo-type button {flex:none;}
+.counter-ammo-type[data-ammo-reserve] {flex-wrap:wrap;cursor:grab;user-select:none;touch-action:none;}
+.counter-reserve-rounds {display:flex;align-items:center;gap:3px;width:100%;padding-left:20px;}
+.counter-reserve-rounds .counter-ammo-token {width:27px;min-width:27px;height:12px;cursor:inherit!important;}
+.counter-reserve-rounds small {color:#9cadb4;font-size:10px;}
+.counter-ammo-dot {width:14px;height:14px;flex:none;border-radius:50%;background:var(--ammo-color);box-shadow:inset 0 0 0 2px #fff5;}
+.counter-magazine small {font-size:10px;color:#92a5ad;}
+.counter-magazine>div:first-child {display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;}
+.counter-ammo-lane {display:flex;flex-wrap:wrap;gap:5px;min-height:46px;align-items:center;}
+.counter-ammo-token {position:relative;display:inline-grid;place-items:center;width:39px;height:17px;min-width:39px;padding:0!important;border:0!important;border-radius:0!important;clip-path:polygon(0 7%,72% 7%,100% 50%,72% 93%,0 93%);background:linear-gradient(#ffffff77 0%,transparent 46%,#0007 100%),var(--ammo-color)!important;color:#14232a!important;cursor:grab!important;}
+.counter-ammo-token[data-ammo-slot] {touch-action:none;user-select:none;}
+.counter-drag-ghost {position:fixed!important;z-index:99999;pointer-events:none;cursor:grabbing!important;filter:drop-shadow(0 5px 5px #0008);}
+.counter-ammo-token::before {content:"";position:absolute;top:2px;bottom:2px;left:3px;width:3px;background:#2228;}
+.counter-ammo-token span {font-size:9px;font-weight:700;}
+.counter-weapon-controls {display:flex;align-items:center;flex-wrap:wrap;}
+.counter-chamber {display:flex;align-items:center;gap:7px;margin-right:auto;}
+.counter-chamber small {font-size:10px;color:#a6b8bd;}
+.counter-weapon-controls label {display:flex;align-items:center;gap:5px;font-size:10px;}
+.counter-shell footer .counter-new-type {pointer-events:auto;}

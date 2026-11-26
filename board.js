@@ -18,7 +18,12 @@
   const isWallet = item => item?.type === "wallet";
   const isImage = item => item?.type === "image";
   const isRpg = item => item?.type === "rpg";
-  const isScalable = item => isWallet(item) || isImage(item) || isRpg(item);
+  const isCounter = item => item?.type === "counter";
+  const isFlipCard = item => item?.type === "flipcard";
+  const isSticky = item => item && !isText(item) && !isScalable(item);
+  const cardText = note => isSticky(note) && note.flipped ? note.back?.text || "" : note.text;
+  const cardColor = note => isSticky(note) && note.flipped ? note.back?.color || note.color : note.color;
+  const isScalable = item => isWallet(item) || isImage(item) || isRpg(item) || isCounter(item) || isFlipCard(item);
   const walletWidth = 440;
   const walletHeight = 640;
   const coinLabel = code => ({ P: "П", G: "З", S: "С", C: "М" })[code];
@@ -54,6 +59,8 @@
   const icon = name => '<svg class="icon" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
   const limit = (value, min, max) => Math.min(max, Math.max(min, value));
   const noteElements = new Map();
+  const counterRefresh = new Map();
+  const rpgRefresh = new Map();
   let notes = examples.map(note => ({ ...note, size: defaultSize }));
   let camera = { x: 0, y: 0, scale: 1 };
   let selected = null;
@@ -70,6 +77,11 @@
   let viewport = canvas.getBoundingClientRect();
   let frameId = null;
   let pendingMove = null;
+  let contextPoint = null;
+  let copiedItems = null;
+  let lastPointerWorld = null;
+  const undoStack = [];
+  let lastSavedSnapshot = null;
   let cameraDirty = false;
   let paintedScale = 0;
   let gridStep = 20;
@@ -153,6 +165,8 @@
     if (!note || typeof note.id !== "string" || ![note.x, note.y, note.tilt].every(Number.isFinite)) return false;
     if (isImage(note)) return typeof note.assetId === "string" && Number.isFinite(note.width) && note.width > 0 && Number.isFinite(note.height) && note.height > 0;
     if (isRpg(note)) return !!note.tracker;
+    if (isCounter(note)) return !!note.counter;
+    if (isFlipCard(note)) return Number.isFinite(note.width) && Number.isFinite(note.height) && note.front && note.back;
     if (isWallet(note)) return Number.isFinite(note.width) && Number.isFinite(note.height);
     return typeof note.text === "string" &&
       (isText(note) ? Number.isFinite(note.width) && note.width >= minTextWidth : Object.hasOwn(papers, note.color));
@@ -165,8 +179,14 @@
       notes = data.notes.map(note => {
         if (isImage(note)) return { ...note, scale: Number.isFinite(note.scale) ? limit(note.scale, .05, 10) : 1 };
         if (isRpg(note)) return { ...note, width: 1080, height: 860, scale: Number.isFinite(note.scale) ? limit(note.scale, .35, 3) : 1, tracker: RpgTracker.normalize(note.tracker) };
+        if (isCounter(note)) return { ...note, width: 520, height: 600, scale: Number.isFinite(note.scale) ? limit(note.scale, .35, 3) : 1, counter: CounterWidget.normalize(note.counter) };
+        if (isFlipCard(note)) return { ...note, scale: Number.isFinite(note.scale) ? limit(note.scale, .35, 3) : 1, front: normalizeCardFace(note.front), back: normalizeCardFace(note.back), flipped: !!note.flipped };
         if (isWallet(note)) return normalizeWallet(note);
-        if (!isText(note)) return { ...note, size: Number.isFinite(note.size) ? Math.max(minSize, note.size) : defaultSize };
+        if (!isText(note)) {
+          if (note.back) return {id:note.id,type:"flipcard",x:note.x,y:note.y,width:240,height:350,scale:1,tilt:0,locked:note.locked,groupId:note.groupId,flipped:!!note.flipped,
+            front:normalizeCardFace({text:note.text,color:note.color}),back:normalizeCardFace(note.back)};
+          return { ...note, size: Number.isFinite(note.size) ? Math.max(minSize, note.size) : defaultSize,flipped:false };
+        }
         return {
           ...note, tilt: 0,
           height: Number.isFinite(note.height) ? Math.max(0, note.height) : 0,
@@ -176,6 +196,17 @@
           align: ["left", "center", "right"].includes(note.align) ? note.align : "left"
         };
       });
+      // Move the legacy right-hand tracker panel into its own linked counter block.
+      for (const character of notes.filter(isRpg)) {
+        const pots = Object.values(character.tracker.potions || {});
+        const resources = character.tracker.resources || {};
+        const hasLegacy = !!(character.tracker.potions || character.tracker.resources);
+        if (!hasLegacy || notes.some(n => isCounter(n) && n.counter.linkId === character.id)) continue;
+        const counter = CounterWidget.create("custom", character.id); counter.title = "Зелья и ресурсы";
+        for (const [key,p] of Object.entries(character.tracker.potions || {})) counter.items.push({id:crypto.randomUUID(),name:key.replaceAll("-"," ") + (p.drunk ? ` · выпито ${p.drunk}` : "") + (p.given ? ` · передано ${p.given}` : ""),value:p.stock,max:10});
+        for (const [name,value,max] of [["Постоянный адреналин",resources.adrenaline,resources.adrenalineTotal],["Временный адреналин",resources.temporary,0],["Ярость",resources.rage,resources.rageTotal]]) if (value || max) counter.items.push({id:crypto.randomUUID(),name,value,max});
+        notes.push({id:crypto.randomUUID(),type:"counter",x:character.x+character.width*character.scale+35,y:character.y,width:520,height:600,scale:.7,tilt:0,counter});
+      }
       if (Object.hasOwn(papers, data.preferredColor)) preferredColor = data.preferredColor;
       const c = data.camera;
       if (c && [c.x, c.y, c.scale].every(Number.isFinite) && c.scale >= minZoom && c.scale <= maxZoom &&
@@ -190,7 +221,14 @@
     if (restoringBackup) return;
     clearTimeout(saveTimer);
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ version: 1, notes, camera, preferredColor, width: canvas.clientWidth, height: canvas.clientHeight }));
+      const data = { version: 1, notes, camera, preferredColor, width: canvas.clientWidth, height: canvas.clientHeight };
+      const serialized = JSON.stringify(data);
+      if (lastSavedSnapshot && lastSavedSnapshot !== serialized) {
+        undoStack.push(lastSavedSnapshot);
+        if (undoStack.length > 50) undoStack.shift();
+      }
+      lastSavedSnapshot = serialized;
+      localStorage.setItem(storageKey, serialized);
       saved.classList.remove("unsaved");
       saved.lastElementChild.textContent = "Сохранено локально";
     } catch {
@@ -453,21 +491,123 @@
       el.setAttribute("aria-label", note.text || "Пустая текстовая область");
       return;
     }
-    const length = note.text.length;
-    const lines = note.text.split("\n").length;
+    const visibleText = cardText(note);
+    const length = visibleText.length;
+    const lines = visibleText.split("\n").length;
     el.classList.toggle("compact", length > 75 || lines > 5);
     el.classList.toggle("dense", length > 120 || lines > 7);
     el.classList.toggle("long", length > 170 || lines > 8);
     if (editor?.el === el) {
       const body = el.querySelector(".note-content");
-      body.textContent = note.text + (note.text.endsWith("\n") ? "\u200b" : "");
+      body.textContent = visibleText + (visibleText.endsWith("\n") ? "\u200b" : "");
       editor.field.style.paddingTop = body.offsetTop + "px";
     }
-    el.setAttribute("aria-label", note.text || "Пустой стикер");
+    el.setAttribute("aria-label", visibleText || "Пустой стикер");
+  }
+  function renderCard(note, el) {
+    if (!isSticky(note)) return;
+    el.style.setProperty("--paper", papers[cardColor(note)][0]);
+    el.classList.toggle("card-flipped", !!note.flipped);
+    el.querySelector(".note-content").textContent = cardText(note);
+    el.querySelector(".card-image")?.remove();
+    const assetId = note.flipped && note.back?.assetId;
+    el.classList.toggle("card-has-image", !!assetId);
+    if (assetId) {
+      const img = document.createElement("img"); img.className = "card-image"; img.alt = "Картинка на обороте"; img.draggable = false;
+      el.insertBefore(img, el.querySelector(".note-content"));
+      readImageAsset(assetId).then(blob => {
+        if (!blob || !img.isConnected) return;
+        const url = URL.createObjectURL(blob);
+        img.onload = img.onerror = () => URL.revokeObjectURL(url);
+        img.src = url;
+      }).catch(() => { img.alt = "Картинка недоступна"; });
+    }
+    adjustText(note, el);
+  }
+  const cloneState = value => JSON.parse(JSON.stringify(value));
+  function characterSnapshot(character, overrideId, overrideCounter) {
+    return { tracker: cloneState(character.tracker), counters: Object.fromEntries(notes.filter(n => isCounter(n) && n.counter.linkId === character.id)
+      .map(n => [n.id, cloneState(n.id === overrideId ? overrideCounter : n.counter)])) };
+  }
+  function recordCharacterAction(character, snapshot) {
+    if (!snapshot) return;
+    character.actionHistory ||= [];
+    character.actionHistory.push(snapshot);
+    if (character.actionHistory.length > 50) character.actionHistory.shift();
+  }
+  function undoCharacterAction(character) {
+    const previous = character.actionHistory?.pop();
+    if (!previous) return false;
+    Object.assign(character.tracker, RpgTracker.normalize(previous.tracker));
+    for (const [id, saved] of Object.entries(previous.counters || {})) {
+      const counter = notes.find(n => n.id === id && isCounter(n));
+      if (!counter) continue;
+      Object.assign(counter.counter, CounterWidget.normalize(saved));
+      counterRefresh.get(id)?.();
+    }
+    save();
+    return true;
+  }
+  function normalizeCardFace(face = {}) {
+    return {title:typeof face.title === "string" ? face.title.slice(0,80) : "",text:typeof face.text === "string" ? face.text.slice(0,5000) : "",
+      color:Object.hasOwn(papers,face.color) ? face.color : "yellow",assetId:typeof face.assetId === "string" ? face.assetId : null};
+  }
+  function renderFlipCard(note, el) {
+    const face = note.flipped ? note.back : note.front;
+    el.classList.toggle("landscape", note.width > note.height);
+    el.style.setProperty("--card-color", papers[face.color][0]);
+    el.querySelector("[data-card-title]").value = face.title;
+    el.querySelector("[data-card-text]").value = face.text;
+    el.querySelector(".flip-side-label").textContent = note.flipped ? "Оборот" : "Лицевая сторона";
+    const image = el.querySelector(".flip-card-image");
+    image.hidden = !face.assetId;
+    image.removeAttribute("src");
+    if (face.assetId) readImageAsset(face.assetId).then(blob => {
+      if (!blob || !image.isConnected || (note.flipped ? note.back : note.front) !== face) return;
+      const url = URL.createObjectURL(blob);
+      image.onload = image.onerror = () => URL.revokeObjectURL(url);
+      image.src = url;
+    }).catch(() => { image.hidden = true; });
+    if (selected?.id === note.id) syncFlipControls(note);
+  }
+  function flipCard(note, el) {
+    if (el.dataset.flipping) return;
+    const shell = el.querySelector(".flip-shell");
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches || !shell.animate) {
+      note.flipped = !note.flipped; renderFlipCard(note,el); save(); return;
+    }
+    el.dataset.flipping = "true";
+    const first = shell.animate([{transform:"perspective(700px) rotateY(0deg)"},{transform:"perspective(700px) rotateY(90deg)"}],{duration:180,easing:"ease-in",fill:"forwards"});
+    first.onfinish = () => {
+      shell.style.transform = "perspective(700px) rotateY(-90deg)";
+      first.cancel();
+      note.flipped = !note.flipped; renderFlipCard(note,el);
+      const second = shell.animate([{transform:"perspective(700px) rotateY(-90deg)"},{transform:"perspective(700px) rotateY(0deg)"}],{duration:200,easing:"ease-out",fill:"forwards"});
+      second.onfinish = () => { second.cancel(); shell.style.transform = ""; delete el.dataset.flipping; save(); };
+    };
+  }
+  function buildFlipCard(note, el) {
+    const shell = document.createElement("div"); shell.className = "flip-shell";
+    shell.innerHTML = '<small class="flip-side-label"></small><input data-card-title placeholder="Добавьте заголовок" maxlength="80" aria-label="Заголовок стороны"><div class="flip-image-slot"><img class="flip-card-image" alt="Картинка на карточке" draggable="false" hidden><span>Перетащите картинку сюда</span></div><textarea data-card-text placeholder="Напишите текст" maxlength="5000" aria-label="Текст стороны"></textarea><button type="button" data-card-flip>↻ Перевернуть</button>';
+    el.append(shell);
+    shell.addEventListener("pointerdown", event => {
+      if (!event.target.closest("input,textarea,button")) return;
+      if (!event.target.closest("[data-card-flip]") && !selection.has(note.id)) selectNote(note);
+      event.stopPropagation();
+    });
+    shell.addEventListener("input", event => {
+      const face = note.flipped ? note.back : note.front;
+      if (event.target.matches("[data-card-title]")) face.title = event.target.value;
+      if (event.target.matches("[data-card-text]")) face.text = event.target.value;
+      saveSoon();
+    });
+    shell.querySelector(".flip-card-image").addEventListener("dragstart", event => event.preventDefault());
+    shell.querySelector("[data-card-flip]").onclick = () => flipCard(note,el);
+    renderFlipCard(note,el);
   }
   function addElement(note) {
     const el = document.createElement("article");
-    el.className = isRpg(note) ? "note rpg-card" : isText(note) ? "note text-area" : isWallet(note) ? "note wallet-card" : isImage(note) ? "note image-card" : "note";
+    el.className = isFlipCard(note) ? "note flip-card" : isCounter(note) ? "note counter-card" : isRpg(note) ? "note rpg-card" : isText(note) ? "note text-area" : isWallet(note) ? "note wallet-card" : isImage(note) ? "note image-card" : "note";
     el.tabIndex = 0;
     el.dataset.id = note.id;
     el.style.setProperty("--tilt", note.tilt + "deg");
@@ -475,7 +615,30 @@
     else if (!isScalable(note)) el.style.setProperty("--paper", papers[note.color][0]);
     positionNote(note, el);
     if (isScalable(note)) {
-      if (isRpg(note)) RpgTracker.mount(el, note.tracker, save);
+      if (isFlipCard(note)) buildFlipCard(note, el);
+      else if (isRpg(note)) rpgRefresh.set(note.id, RpgTracker.mount(el, note.tracker, (action, before) => {
+        if (action?.type !== "undo") recordCharacterAction(note, before);
+        if (action?.type === "name") notes.filter(isCounter).forEach(n => counterRefresh.get(n.id)?.());
+        if (["turn", "use"].includes(action?.type) && note.tracker.mode === "action") {
+          for (const counterNote of notes.filter(n => isCounter(n) && n.counter.linkId === note.id)) CounterWidget.turn(counterNote.counter);
+          notes.filter(n => isCounter(n) && n.counter.linkId === note.id).forEach(n => counterRefresh.get(n.id)?.());
+        }
+        if (action?.type === "day") notes.filter(n => isCounter(n) && n.counter.linkId === note.id).forEach(n => { CounterWidget.day(n.counter); counterRefresh.get(n.id)?.(); });
+        save();
+      }, () => characterSnapshot(note), () => undoCharacterAction(note), () => !!note.actionHistory?.length));
+      else if (isCounter(note)) counterRefresh.set(note.id, CounterWidget.mount(el, note.counter, notes.filter(isRpg), (updated, before) => {
+        const character = notes.find(n => isRpg(n) && n.id === updated.linkId);
+        if (character && before) recordCharacterAction(character, characterSnapshot(character, note.id, before));
+        note.counter = updated;
+        if (character) rpgRefresh.get(character.id)?.();
+        save();
+      }, height => {
+        if (note.height === height) return;
+        note.height = height;
+        el.style.setProperty("--wallet-height", height + "px");
+        if (selection.has(note.id)) placePalette();
+        saveSoon();
+      }));
       else if (isWallet(note)) buildWallet(note, el);
       else {
         const img = document.createElement("img");
@@ -511,10 +674,11 @@
         corners.append(handle);
       }
       el.append(body, corners);
-      adjustText(note, el);
+      if (isText(note)) adjustText(note, el); else renderCard(note, el);
     }
     $("notes").append(el);
     noteElements.set(note.id, el);
+    if (isCounter(note)) counterRefresh.get(note.id)?.();
     applyStackOrder();
     applyLockState(note, el);
     return el;
@@ -538,7 +702,7 @@
         barWidth: bar.offsetWidth, barHeight: bar.offsetHeight
       };
       if (bar === palette) {
-        for (const btn of bar.querySelectorAll(".swatch")) btn.setAttribute("aria-pressed", String(btn.dataset.color === selected.color));
+        for (const btn of bar.querySelectorAll(".swatch")) btn.setAttribute("aria-pressed", String(btn.dataset.color === cardColor(selected)));
       }
     }
     const { width, height, barWidth, barHeight } = paletteMetrics;
@@ -567,13 +731,13 @@
   function applyLockState(note, el) {
     el.classList.toggle("locked", !!note.locked);
     for (const child of el.children) {
-      child.inert = !!note.locked && !((isWallet(note) && child.classList.contains("wallet-shell")) || (isRpg(note) && child.classList.contains("rpg-shell")));
+      child.inert = !!note.locked && !((isWallet(note) && child.classList.contains("wallet-shell")) || (isRpg(note) && child.classList.contains("rpg-shell")) || (isCounter(note) && child.classList.contains("counter-shell")) || (isFlipCard(note) && child.classList.contains("flip-shell")));
     }
   }
   function syncLockControls() {
     for (const bar of [palette, textToolbar, walletToolbar]) {
       for (const child of bar.children) {
-        child.inert = !!selected?.locked && !child.classList.contains("lock-element");
+        child.inert = !!selected?.locked && !child.classList.contains("lock-element") && !(isFlipCard(selected) && child.id === "flip-controls");
       }
       const button = bar.querySelector(".lock-element");
       if (!button) continue;
@@ -625,8 +789,10 @@
     }
     $("wallet-appearance").open = false;
     $("wallet-appearance").hidden = !isWallet(note);
-    walletToolbar.querySelector(".wallet-toolbar-label").textContent = isRpg(note) ? "Лист персонажа" : isImage(note) ? "Изображение" : "Кошелёк";
-    $("remove-wallet").title = $("remove-wallet").ariaLabel = isRpg(note) ? "Удалить лист персонажа" : isImage(note) ? "Удалить изображение" : "Удалить кошелёк";
+    $("flip-controls").hidden = !isFlipCard(note);
+    if (isFlipCard(note)) syncFlipControls(note);
+    walletToolbar.querySelector(".wallet-toolbar-label").textContent = isFlipCard(note) ? "Флип-карточка" : isCounter(note) ? "Счётчик" : isRpg(note) ? "Лист персонажа" : isImage(note) ? "Изображение" : "Кошелёк";
+    $("remove-wallet").title = $("remove-wallet").ariaLabel = isFlipCard(note) ? "Удалить флип-карточку" : isCounter(note) ? "Удалить счётчик" : isRpg(note) ? "Удалить лист персонажа" : isImage(note) ? "Удалить изображение" : "Удалить кошелёк";
     syncLockControls();
     placePalette();
   }
@@ -634,15 +800,15 @@
     if (!editor) return;
     const { field, note, el } = editor;
     editor = null;
-    note.text = field.value;
-    el.querySelector(".note-content").textContent = note.text;
+    if (isSticky(note) && note.flipped) note.back.text = field.value; else note.text = field.value;
+    el.querySelector(".note-content").textContent = cardText(note);
     field.remove();
     el.classList.remove("editing");
     adjustText(note, el);
     placePalette();
     save();
   }
-  function editNote(note, offset = note.text.length) {
+  function editNote(note, offset = cardText(note).length) {
     if (note.locked || note.groupId || selection.size > 1) return;
     finishEdit();
     selectNote(note);
@@ -651,7 +817,7 @@
     field.className = "note-editor";
     field.setAttribute("aria-label", isText(note) ? "Текстовая область" : "Текст стикера");
     field.placeholder = isText(note) ? "Введите текст…" : "Ваш текст…";
-    field.value = note.text;
+    field.value = cardText(note);
     editor = { note, el, field };
     el.classList.add("editing");
     palette.hidden = true;
@@ -660,7 +826,7 @@
     field.focus({ preventScroll: true });
     field.setSelectionRange(offset, offset);
     field.addEventListener("input", () => {
-      note.text = field.value;
+      if (isSticky(note) && note.flipped) note.back.text = field.value; else note.text = field.value;
       adjustText(note, el);
       if (isText(note)) placePalette();
       saveSoon();
@@ -675,16 +841,19 @@
     tool = next;
     $("select-tool").setAttribute("aria-pressed", String(next === "select"));
     $("note-tool").setAttribute("aria-pressed", String(next === "note"));
+    $("flip-tool").setAttribute("aria-pressed", String(next === "flipcard"));
     $("text-tool").setAttribute("aria-pressed", String(next === "text"));
     $("rpg-tool").setAttribute("aria-pressed", String(next === "rpg"));
     $("wallet-tool").setAttribute("aria-pressed", String(next === "wallet"));
+    $("counter-tool").setAttribute("aria-pressed", String(next === "counter"));
     canvas.classList.toggle("placing", next === "note");
     canvas.classList.toggle("placing-text", next === "text");
-    canvas.classList.toggle("placing-wallet", next === "wallet");
+    canvas.classList.toggle("placing-wallet", next === "wallet" || next === "flipcard");
+    canvas.classList.toggle("placing-counter", next === "counter");
     const tip = $("placement-tip");
     tip.hidden = next === "select";
     tip.textContent = next === "rpg" ? "Нажмите на холст, чтобы добавить лист персонажа" : next === "text" ? "Нажмите, чтобы ввести текст, или потяните, чтобы задать ширину" :
-      next === "wallet" ? "Нажмите на холст, чтобы добавить кошелёк" : "Нажмите на холст, чтобы добавить стикер";
+      next === "wallet" ? "Нажмите на холст, чтобы добавить кошелёк" : next === "counter" ? "Нажмите на холст, чтобы добавить счётчик" : next === "flipcard" ? "Нажмите на холст, чтобы добавить карточку" : "Нажмите на холст, чтобы добавить стикер";
     if (next !== "select") selectNote(null);
     setHelp(false);
   }
@@ -697,6 +866,11 @@
     el.focus({ preventScroll: true });
     
     save();
+  }
+  function createFlipCard(point) {
+    const note = {id:crypto.randomUUID(),type:"flipcard",x:point.x-120,y:point.y-175,width:240,height:350,scale:1,tilt:0,flipped:false,
+      front:{title:"",text:"",color:"yellow",assetId:null},back:{title:"",text:"",color:"yellow",assetId:null}};
+    notes.push(note); addElement(note); setTool("select"); selectNote(note); save();
   }
   function createText(point, width) {
     const note = {
@@ -713,8 +887,14 @@
   function createRpg(point) {
     const scale = Math.min(1, Math.max(.35, (canvas.clientHeight - 150) / (860 * camera.scale)));
     const note = { id: crypto.randomUUID(), type: "rpg", text: "", tilt: 0,
-      x: point.x - 540 * scale, y: point.y - 430 * scale, width: 1080, height: 860, scale, tracker: RpgTracker.normalize() };
-    notes.push(note); addElement(note); setTool("select"); selectNote(note);  save();
+      x: point.x - 540 * scale, y: point.y - 430 * scale, width: 1080, height: 860, scale, tracker: RpgTracker.normalize({ name: "Персонаж" }) };
+    notes.push(note); addElement(note); notes.filter(isCounter).forEach(n => counterRefresh.get(n.id)?.()); setTool("select"); selectNote(note); save();
+  }
+  function createCounter(point, preset = "custom") {
+    const scale = Math.min(1, Math.max(.35, (canvas.clientHeight - 150) / (600 * camera.scale)));
+    const character = notes.find(n => isRpg(n));
+    const note = { id: crypto.randomUUID(), type: "counter", x: point.x - 260 * scale, y: point.y - 300 * scale, width: 520, height: 600, scale, tilt: 0, counter: CounterWidget.create(preset, character?.id || "") };
+    notes.push(note); addElement(note); setTool("select"); selectNote(note); save();
   }
   function createWallet(point) {
     const note = normalizeWallet({
@@ -736,6 +916,8 @@
     if (!selected || selected.locked || editor) return;
     if (isWallet(selected) && !window.confirm("Удалить кошелёк?\n\nВсе операции, баланс и настройки этого кошелька будут удалены. Данные не сохранятся, восстановить их будет невозможно.")) return;
     if (isRpg(selected) && !window.confirm("Удалить лист персонажа? Все навыки, зелья, ресурсы и история действий будут удалены. Данные не сохранятся.")) return;
+    if (isCounter(selected) && !window.confirm("Удалить счётчик? Все его блоки и значения будут удалены.")) return;
+    if (isFlipCard(selected) && !window.confirm("Удалить флип-карточку? Текст и картинки обеих сторон будут удалены с доски.")) return;
     const { id } = selected;
     selectNote(null);
     noteElements.get(id).remove();
@@ -754,7 +936,7 @@
     btn.innerHTML = icon("check");
     btn.addEventListener("click", () => {
       if (!selected) return;
-      preferredColor = selected.color = color;
+      if (isSticky(selected) && selected.flipped) selected.back.color = color; else preferredColor = selected.color = color;
       noteElements.get(selected.id).style.setProperty("--paper", hex);
       placePalette();
       save();
@@ -837,9 +1019,56 @@
   }
   $("select-tool").onclick = () => setTool("select");
   $("note-tool").onclick = () => setTool("note");
+  $("flip-tool").onclick = () => setTool("flipcard");
   $("text-tool").onclick = () => setTool("text");
   $("rpg-tool").onclick = () => setTool("rpg");
+  $("counter-tool").onclick = () => setTool("counter");
   $("wallet-tool").onclick = () => setTool("wallet");
+  const flipColors = $("flip-colors");
+  for (const [key,[hex,label]] of Object.entries(papers)) {
+    const swatch = document.createElement("button");
+    swatch.type = "button"; swatch.className = "flip-swatch"; swatch.dataset.color = key;
+    swatch.title = label; swatch.setAttribute("aria-label", label); swatch.style.setProperty("--paper",hex);
+    swatch.onclick = () => {
+      if (!isFlipCard(selected)) return;
+      (selected.flipped ? selected.back : selected.front).color = key;
+      renderFlipCard(selected,noteElements.get(selected.id)); save();
+    };
+    flipColors.append(swatch);
+  }
+  function syncFlipControls(note) {
+    const color = (note.flipped ? note.back : note.front).color;
+    flipColors.querySelectorAll(".flip-swatch").forEach(button => button.setAttribute("aria-pressed",String(button.dataset.color === color)));
+    $("flip-orientation").textContent = note.width > note.height ? "▯" : "▭";
+    $("flip-image-remove").disabled = !(note.flipped ? note.back : note.front).assetId;
+  }
+  $("flip-orientation").onclick = () => {
+    if (!isFlipCard(selected)) return;
+    [selected.width,selected.height] = [selected.height,selected.width];
+    positionNote(selected,noteElements.get(selected.id)); renderFlipCard(selected,noteElements.get(selected.id)); drawTextSelection(); placePalette(); save();
+  };
+  $("flip-toolbar-button").onclick = () => {
+    if (!isFlipCard(selected)) return;
+    flipCard(selected,noteElements.get(selected.id));
+  };
+  $("flip-image-remove").onclick = () => {
+    if (!isFlipCard(selected)) return;
+    (selected.flipped ? selected.back : selected.front).assetId = null;
+    renderFlipCard(selected,noteElements.get(selected.id)); save();
+  };
+  let flipImageTarget = null;
+  $("flip-image-upload").onclick = () => { if (!isFlipCard(selected)) return; flipImageTarget = {note:selected,flipped:selected.flipped}; $("flip-image-file").value = ""; $("flip-image-file").click(); };
+  $("flip-image-file").onchange = async event => {
+    const file = event.target.files?.[0], target = flipImageTarget;
+    if (!file || !target || !file.type.startsWith("image/")) return;
+    try {
+      const db = await imageStore(), id = crypto.randomUUID();
+      await new Promise((resolve,reject) => { const tx=db.transaction("images","readwrite");tx.objectStore("images").put(file,id);tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error); });
+      (target.flipped ? target.note.back : target.note.front).assetId = id;
+      if (noteElements.has(target.note.id)) renderFlipCard(target.note,noteElements.get(target.note.id));
+      save();
+    } catch { window.alert("Не удалось сохранить картинку."); }
+  };
   $("remove-wallet").onclick = removeNote;
   $("wallet-color").oninput = event => {
     if (!isWallet(selected)) return;
@@ -877,10 +1106,59 @@
     if (editor && event.target !== editor.field && !event.target.closest("#text-toolbar")) finishEdit();
   }, true);
   canvas.addEventListener("contextmenu", event => {
-    if (!event.target.closest("input,select,textarea,.wallet-interactive")) event.preventDefault();
+    if (event.target.closest("input,select,textarea,.rpg-modal,.wallet-entry,.wallet-rates")) return;
+    event.preventDefault();
+    const el = event.target.closest(".note");
+    const note = el && notes.find(n => n.id === el.dataset.id);
+    if (note && !selection.has(note.id)) selectNote(note);
+    if (!note && !selection.size) selectNote(null);
+    contextPoint = localPoint(event.clientX, event.clientY);
+    const menu = $("context-menu");
+    menu.hidden = false;
+    menu.style.left = Math.min(event.clientX, innerWidth - menu.offsetWidth - 8) + "px";
+    menu.style.top = Math.min(event.clientY, innerHeight - menu.offsetHeight - 8) + "px";
+    menu.querySelectorAll("button[data-action]").forEach(button => {
+      const action = button.dataset.action;
+      button.disabled = action !== "paste" && !selection.size || ["cut", "delete"].includes(action) && notes.some(n => selection.has(n.id) && n.locked) || ["layerUp", "layerDown", "layerFront", "layerBack"].includes(action) && notes.some(n => selection.has(n.id) && n.locked);
+    });
   });
+  const contextMenu = $("context-menu");
+  function closeContextMenu() { contextMenu.hidden = true; }
+  function copySelection(cut = false) {
+    const chosen = notes.filter(n => selection.has(n.id));
+    if (!chosen.length || cut && chosen.some(n => n.locked)) return;
+    copiedItems = JSON.parse(JSON.stringify(chosen));
+    if (cut) removeGroupSelection();
+    closeContextMenu();
+  }
+  function pasteSelection(point = lastPointerWorld || contextPoint || localPoint(viewport.left + viewport.width / 2, viewport.top + viewport.height / 2)) {
+    if (!copiedItems?.length) return;
+    finishEdit();
+    const map = new Map(copiedItems.map(n => [n.id, crypto.randomUUID()]));
+    const minX = Math.min(...copiedItems.map(n => n.x)), minY = Math.min(...copiedItems.map(n => n.y));
+    const copies = copiedItems.map(item => ({ ...JSON.parse(JSON.stringify(item)), id: map.get(item.id), x: item.x + point.x - minX + 24, y: item.y + point.y - minY + 24, groupId: item.groupId ? map.get(copiedItems.find(n => n.groupId === item.groupId)?.id) || undefined : undefined }));
+    notes.push(...copies); copies.forEach(addElement); applyStackOrder(); selectNote(copies[0]); closeContextMenu(); save();
+  }
+  function undoBoard() {
+    finishEdit(); clearTimeout(saveTimer);
+    const previous = undoStack.pop();
+    if (!previous) return;
+    try { localStorage.setItem(storageKey, previous); location.reload(); }
+    catch { undoStack.push(previous); saved.classList.add("unsaved"); saved.title = "Не удалось отменить действие"; }
+  }
+  contextMenu.addEventListener("click", event => {
+    const button = event.target.closest("button[data-action]"); if (!button || button.disabled) return;
+    const action = button.dataset.action; closeContextMenu();
+    if (action === "copy") copySelection();
+    else if (action === "cut") copySelection(true);
+    else if (action === "paste") pasteSelection();
+    else if (action === "delete") selection.size > 1 ? removeGroupSelection() : removeNote();
+    else if (action.startsWith("layer")) changeLayer(({layerUp:"up",layerDown:"down",layerFront:"front",layerBack:"back"})[action]);
+  });
+  document.addEventListener("pointerdown", event => { if (!contextMenu.contains(event.target)) closeContextMenu(); });
+  window.addEventListener("resize", closeContextMenu);
   canvas.addEventListener("wheel", event => {
-    if (event.target.closest("#group-toolbar,#text-toolbar,.wallet-interactive") || (event.target.closest("textarea") && !event.ctrlKey)) return;
+    if (event.target.closest("#group-toolbar,#text-toolbar") || (event.target.closest("textarea") && !event.ctrlKey)) return;
     event.preventDefault();
     if (gesture?.action === "resize" || gesture?.action === "groupResize") return;
     const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.height : 1);
@@ -888,14 +1166,22 @@
   }, { passive: false });
   canvas.addEventListener("pointerdown", event => {
     if (event.target.closest("#group-toolbar,#group-box,#palette,#text-toolbar,#wallet-toolbar,textarea") || gesture || !event.isPrimary) return;
+    const pan = event.button === 1 || (spaceHeld && event.button === 0);
+    if (!pan && event.button !== 0) return;
+    if (pan) {
+      gesture = { action: "pan", pointer: event.pointerId, mouseX: event.clientX, mouseY: event.clientY,
+        x: camera.x, y: camera.y, startPoint: localPoint(event.clientX, event.clientY), note: null, target: canvas, moving: false };
+      canvas.classList.add("panning");
+      canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      return;
+    }
     if (event.target.closest(".wallet-interactive")) {
       const walletEl = event.target.closest(".wallet-card,.rpg-card");
       const wallet = walletEl && notes.find(item => item.id === walletEl.dataset.id);
       if (wallet && selected !== wallet) selectNote(wallet);
       return;
     }
-    const pan = event.button === 2 || (spaceHeld && event.button === 0);
-    if (!pan && event.button !== 0) return;
     const el = event.target.closest(".note");
     const note = el && notes.find(n => n.id === el.dataset.id);
     if (event.shiftKey && note && !pan && tool === "select") {
@@ -907,7 +1193,7 @@
       return;
     }
     const handle = event.target.closest(".resize-handle");
-    const action = pan ? "pan" : tool === "text" ? "createText" : tool === "rpg" ? "createRpg" : tool === "wallet" ? "createWallet" : tool === "note" ? "create" : handle ? "resize" : note ? "drag" : "background";
+    const action = pan ? "pan" : tool === "text" ? "createText" : tool === "rpg" ? "createRpg" : tool === "wallet" ? "createWallet" : tool === "counter" ? "createCounter" : tool === "flipcard" ? "createFlipCard" : tool === "note" ? "create" : handle ? "resize" : note ? "drag" : "background";
     if (action === "drag" && !selection.has(note.id)) selectNote(note);
     if (action === "drag" && notes.some(n => selection.has(n.id) && n.locked)) return;
     const baseSelection = event.shiftKey ? [...selection] : [];
@@ -942,6 +1228,7 @@
     if (action === "pan") canvas.classList.add("panning");
   });
   canvas.addEventListener("pointermove", event => {
+    lastPointerWorld = localPoint(event.clientX, event.clientY);
     if (!gesture || gesture.pointer !== event.pointerId) return;
     pendingMove = event;
     requestDraw();
@@ -1089,7 +1376,25 @@
       createRpg(localPoint(event.clientX, event.clientY));
     } else if (event.type === "pointerup" && g.action === "createWallet" && !g.moving) {
       createWallet(localPoint(event.clientX, event.clientY));
+    } else if (event.type === "pointerup" && g.action === "createCounter" && !g.moving) {
+      createCounter(localPoint(event.clientX, event.clientY));
+    } else if (event.type === "pointerup" && g.action === "createFlipCard" && !g.moving) {
+      createFlipCard(localPoint(event.clientX, event.clientY));
     } else {
+      if (event.type === "pointerup" && g.action === "drag" && g.moving && isImage(g.note) && !g.members && !g.note.groupId) {
+        const dragged = noteElements.get(g.note.id);
+        dragged.style.pointerEvents = "none";
+        const slot = document.elementFromPoint(event.clientX,event.clientY)?.closest(".flip-image-slot");
+        dragged.style.pointerEvents = "";
+        const cardEl = slot?.closest(".flip-card");
+        const card = cardEl && notes.find(n => n.id === cardEl.dataset.id);
+        if (card && !card.locked) {
+          (card.flipped ? card.back : card.front).assetId = g.note.assetId;
+          notes = notes.filter(n => n.id !== g.note.id);
+          dragged.remove(); noteElements.delete(g.note.id);
+          renderFlipCard(card,cardEl); selectNote(card); save(); return;
+        }
+      }
       if (g.moving && g.action === "resize" && isText(g.note)) syncTextControls(g.note);
       placePalette();
       if (g.moving) save();
@@ -1106,7 +1411,7 @@
     if (!note || isScalable(note)) return;
     const caret = document.caretRangeFromPoint?.(event.clientX, event.clientY);
     const body = el.querySelector(".note-content");
-    const offset = caret && caret.startContainer === body.firstChild ? caret.startOffset : note.text.length;
+    const offset = caret && caret.startContainer === body.firstChild ? caret.startOffset : cardText(note).length;
     editNote(note, offset);
   });
   function releaseSpace() {
@@ -1127,6 +1432,14 @@
       }
       return;
     }
+    if ((event.ctrlKey || event.metaKey) && ["KeyC", "KeyX", "KeyV"].includes(event.code)) {
+      event.preventDefault();
+      if (event.code === "KeyC") copySelection();
+      else if (event.code === "KeyX") copySelection(true);
+      else pasteSelection();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.code === "KeyZ") { event.preventDefault(); undoBoard(); return; }
     if ((event.ctrlKey || event.metaKey) && event.code === "KeyG") { event.preventDefault(); event.shiftKey ? ungroupSelection() : groupSelection(); return; }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.code === "Space" && !event.target.closest("button")) {
@@ -1277,7 +1590,7 @@
   function removeGroupSelection() {
     const members=notes.filter(n=>selection.has(n.id));
     if(!members.length||members.some(n=>n.locked)) return;
-    if(members.some(n => isWallet(n) || isRpg(n))&&!confirm("Удалить выбранные элементы? Все данные кошельков и листов персонажа будут удалены без возможности восстановления.")) return;
+    if(members.some(n => isWallet(n) || isRpg(n) || isCounter(n) || isFlipCard(n))&&!confirm("Удалить выбранные элементы? Данные виджетов и карточек будут удалены.")) return;
     finishEdit(); const ids=new Set(selection); selectNote(null);
     for(const id of ids){ noteElements.get(id).remove(); noteElements.delete(id); }
     notes=notes.filter(n=>!ids.has(n.id)); applyStackOrder();  save();
@@ -1328,21 +1641,23 @@
       if (Array.isArray(data?.notes)) for (const note of data.notes) {
         if (isRpg(note)) RpgTracker.normalize(note.tracker);
         if (isWallet(note)) normalizeWallet(note);
+        if (isCounter(note)) CounterWidget.normalize(note.counter);
       }
     } catch { return false; }
     return data && data.version === 1 && Array.isArray(data.notes) && data.notes.every(n =>
-      validNote(n) && [undefined, "text", "wallet", "image", "rpg"].includes(n.type) &&
+      validNote(n) && [undefined, "text", "wallet", "image", "rpg", "counter", "flipcard"].includes(n.type) &&
       (!isScalable(n) || (Number.isFinite(n.scale) && n.scale > 0 && Number.isFinite(n.width) && n.width > 0 && Number.isFinite(n.height) && n.height > 0)) &&
-      (!isRpg(n) || (n.tracker && typeof n.tracker === "object" && Array.isArray(n.tracker.skills)))) &&
+      (!isRpg(n) || (n.tracker && typeof n.tracker === "object" && Array.isArray(n.tracker.skills))) &&
+      (!isCounter(n) || (n.counter && typeof n.counter === "object" && Array.isArray(n.counter.items))) &&
       new Set(data.notes.map(n => n.id)).size === data.notes.length &&
       data.camera && [data.camera.x, data.camera.y, data.camera.scale].every(Number.isFinite) &&
-      data.camera.scale >= minZoom && data.camera.scale <= maxZoom;
+      data.camera.scale >= minZoom && data.camera.scale <= maxZoom);
   }
   async function restoreBackup({ board, images }) {
     // New keys keep existing assets intact if storage runs out before the board is committed.
     const remap = new Map([...images.keys()].map(id => [id, crypto.randomUUID()]));
     const data = JSON.parse(JSON.stringify(board));
-    data.notes.forEach(n => { if (isImage(n)) n.assetId = remap.get(n.assetId); });
+    data.notes.forEach(n => { if (isImage(n)) n.assetId = remap.get(n.assetId); if (n.front?.assetId) n.front.assetId = remap.get(n.front.assetId); if (n.back?.assetId) n.back.assetId = remap.get(n.back.assetId); });
     let db;
     if (images.size) {
       db = await imageStore();
