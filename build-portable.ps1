@@ -38,6 +38,5 @@ try {
 $configuration = if ($DebugBuild) { 'debug' } else { 'release' }
 $executable = Join-Path $output ($appName + '.exe')
 Copy-Item -LiteralPath (Join-Path $target "$configuration\$binaryName.exe") -Destination $executable -Force
-New-Item -ItemType Directory -Force -Path (Join-Path $output 'app-data\backups') | Out-Null
 Write-Host ('Готово: ' + $executable)
 

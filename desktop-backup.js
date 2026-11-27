@@ -7,7 +7,7 @@
   const assetPath = id => `${base}/assets/${encodeURIComponent(id)}.blob`;
   const snapshotName = time => `snapshot-${time}.json`;
   const assetIds = board => [...new Set(board.notes.flatMap(note =>
-    [note.type === 'image' ? note.assetId : null, note.front?.assetId, note.back?.assetId].filter(Boolean)))];
+    [note.type === 'image' ? note.assetId : null, note.front?.assetId, note.back?.assetId, ...(note.table?.images||[]).flat()].filter(Boolean)))];
 
   async function createSnapshot(fs, directory, board, readAsset, time = Date.now()) {
     const options = { baseDir: directory };
@@ -56,7 +56,7 @@
     const panel = document.querySelector('#backup-menu .backup-panel');
     const status = document.getElementById('backup-status');
     const label = document.createElement('small');
-    label.textContent = 'Автокопии хранятся рядом с программой в app-data/backups.';
+    label.textContent = 'Автокопии хранятся в папке данных пользователя: Huiro/backups.';
     const select = document.createElement('select');
     select.setAttribute('aria-label', 'Выбрать автоматическую копию');
     const restore = document.createElement('button');

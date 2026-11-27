@@ -15,6 +15,7 @@
   --chrome: #262724;
 }
 * { box-sizing: border-box; }
+button { user-select:none; -webkit-user-select:none; }
 body { margin: 0; overflow: hidden; background: #f8f8f3; }
 button { font: inherit; color: inherit; cursor: pointer; border: 0; background: transparent; }
 button:focus-visible, [tabindex="0"]:focus-visible { outline: 3px solid #485df7; outline-offset: 3px; }
@@ -41,6 +42,17 @@ h1 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.3; }
 #context-menu button:disabled { opacity:.4; cursor:default; }
 #context-menu kbd { color:#77796f; margin-left:12px; }
 #context-menu hr { border:0; border-top:1px solid #ecece7; margin:4px 3px; }
+.confirm-dialog { width:min(420px,calc(100vw - 32px)); padding:0; border:1px solid #e6e8e4; border-radius:18px; color:#292b26; background:#fff; box-shadow:0 24px 80px #18201b40; }
+.confirm-dialog::backdrop { background:#17201bcc; backdrop-filter:blur(3px); }
+.confirm-card { padding:25px; }
+.confirm-icon { display:grid; place-items:center; width:44px; height:44px; margin-bottom:18px; border-radius:14px; color:#a43c32; background:#fff0ed; font-size:22px; }
+.confirm-card h2 { margin:0 0 8px; font-size:20px; }
+.confirm-card p { margin:0; color:#666b64; font-size:14px; line-height:1.55; }
+.confirm-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:24px; }
+.confirm-actions button { min-height:38px; padding:0 15px; border:1px solid #e3e5e0; border-radius:9px; background:#f7f8f5; font-size:13px; }
+.confirm-actions button:hover { background:#eef0eb; }
+.confirm-actions .danger { border-color:#a83e34; background:#a83e34; color:white; }
+.confirm-actions .danger:hover { background:#8f3028; }
 .context-layer-actions { display:flex; justify-content:space-between; gap:3px; }
 #context-menu .context-layer-actions button { display:grid; place-items:center; width:42px; height:36px; padding:0; }
 .context-layer-actions .icon { width:20px; height:20px; }
@@ -78,6 +90,26 @@ h1 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.3; }
 .flip-shell input,.flip-shell textarea {width:100%;border:0;outline:0;background:transparent;color:#38372d;text-align:center;font:inherit;resize:none;}
 .flip-shell input {font-size:19px;font-weight:650;}
 .flip-shell textarea {flex:1;min-height:20px;font-size:15px;}
+.flip-text-slot {flex:1;min-height:0;width:100%;display:flex;align-items:center;}
+.flip-text-slot textarea {height:100%;overflow-y:auto;}
+.flip-card.without-image .flip-image-slot {display:none;}
+.flip-card.without-image .flip-text-slot textarea {flex:none;}
+.flip-card.without-image .flip-shell input[data-card-title] {flex:none;margin-top:0;}
+.flip-card.has-image .flip-shell input[data-card-title] {display:none;}
+.flip-shell {position:relative;justify-content:center;gap:8px;padding:18px 16px 58px;}
+.flip-side-label {position:absolute;top:10px;left:12px;}
+.flip-shell input[data-card-title] {flex:none;height:auto;min-height:1.2em;font-size:13px;font-weight:400;}
+.flip-shell textarea[data-card-text] {font-size:28px;line-height:1.2;}
+.flip-text-slot {flex:0 0 auto;min-height:0;}
+.flip-text-slot textarea {padding:0;}
+.flip-shell button[data-card-flip] {position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;justify-content:center;gap:6px;width:max-content!important;min-width:0;max-width:calc(100% - 20px);white-space:nowrap;flex:none;font-size:14px;line-height:1.2;padding:7px 12px;}
+.flip-card.has-image .flip-shell {justify-content:flex-start;gap:6px;padding:18px 16px 58px;}
+.flip-card.has-image .flip-image-slot {flex:1;min-height:0;height:auto;border-color:transparent;}
+.flip-card.has-image .flip-text-slot {width:100%;height:auto!important;max-height:24%;overflow:auto;}
+.flip-card.has-image .flip-text-slot textarea {height:auto!important;max-height:100%;font-size:28px;flex:none;}
+.flip-card.without-image .flip-shell {justify-content:center;}
+.flip-card.without-image .flip-text-slot {height:auto!important;max-height:55%;overflow:auto;}
+.flip-card.without-image .flip-text-slot textarea {font-size:28px;}
 .flip-image-slot {position:relative;display:grid;place-items:center;width:100%;min-height:55%;overflow:hidden;border:1px dashed #746d563e;border-radius:11px;color:#77705b;font-size:11px;}
 .flip-card.landscape .flip-image-slot {min-height:32%;}
 .flip-card-image {width:100%;height:100%;object-fit:contain;position:absolute;inset:0;}
@@ -371,7 +403,7 @@ dd { margin: 0; text-align: right; color: #65685e; }
 .table-card [data-edge="e"] { left:100%; }
 .table-card [data-edge="n"] { top:0; }
 .table-card [data-edge="s"] { top:100%; }
-.table-grid { display:grid; width:100%; height:100%; overflow:hidden; background:transparent; }
+.table-grid { display:grid; width:100%; height:100%; overflow:visible; background:transparent; }
 .table-cell { min-width:0; min-height:0; padding:9px; background:transparent; white-space:pre-wrap; overflow-wrap:anywhere; overflow:hidden; border-right:var(--table-border-width) solid var(--table-border-color); border-bottom:var(--table-border-width) solid var(--table-border-color); font:16px/1.35 "Segoe UI",Arial,sans-serif; cursor:default; }
 .table-cell[data-col="0"] { border-left:var(--table-border-width) solid var(--table-border-color); }
 .table-cell[data-row="0"] { border-top:var(--table-border-width) solid var(--table-border-color); }
@@ -389,6 +421,7 @@ dd { margin: 0; text-align: right; color: #65685e; }
 .table-card.selected .table-add.near-active { display:block; }
 #table-controls { display:flex; align-items:center; gap:4px; }
 #table-controls[hidden] { display:none; }
+#table-controls button[hidden] { display:none; }
 #table-controls button { width:32px; height:32px; padding:0; font-size:18px; white-space:nowrap; }
 #table-controls label { display:flex; align-items:center; gap:4px; font-size:11px; white-space:nowrap; }
 #table-border-width { width:44px; height:30px; }
@@ -434,8 +467,21 @@ dd { margin: 0; text-align: right; color: #65685e; }
 .backup-panel select { display:block; width:100%; margin-top:8px; padding:9px; border:1px solid #dce2d9; border-radius:7px; background:#fff; color:#30392f; }
 .backup-panel small { display:block; margin-top:12px; font-size:11px; line-height:1.5; color:#787c73; }
 #backup-status:empty { display:none; }
+.note.shape-card {width:var(--wallet-width);height:var(--wallet-height);padding:0;background:transparent;box-shadow:none;transform-origin:0 0;overflow:visible;}
+.shape-card::before,.shape-card.selected::after {content:none;}
+.shape-drawing {width:100%;height:100%;display:block;pointer-events:none;}
+.shape-card .resize-handle {transform:translate(-50%,-50%) scale(calc(var(--handle-scale,1)*var(--wallet-inverse,1)));}
+.shape-card [data-edge="n"] {left:50%;top:0;cursor:ns-resize;}.shape-card [data-edge="s"] {left:50%;top:100%;cursor:ns-resize;}
+.shape-card [data-edge="w"] {left:0;top:50%;cursor:ew-resize;}.shape-card [data-edge="e"] {left:100%;top:50%;cursor:ew-resize;}
+#shape-controls {display:flex;align-items:center;gap:8px;font-size:12px;}
+#shape-controls[hidden],#shape-picker[hidden] {display:none;}
+#shape-controls label {display:flex;align-items:center;gap:4px;white-space:nowrap;}
+#shape-controls input[type="color"] {width:30px;height:28px;padding:0;border:0;}#shape-width,#shape-radius {width:60px;}
+#shape-controls #shape-radius-control[hidden] {display:none;}
+#shape-picker {position:fixed;left:72px;top:240px;z-index:30;background:white;border:1px solid #ddd;border-radius:12px;padding:6px;box-shadow:0 6px 20px #0002;}
+#shape-picker button {display:block;padding:10px;width:100%;text-align:left;}#shape-picker button:hover {background:#f0f1f4;}
   </style>
-  <link rel="stylesheet" href="rpg.css">
+  <link rel="stylesheet" href="rpg.css?v=record-table-v4">
 </head>
 <body>
   <svg class="symbol-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -514,6 +560,7 @@ dd { margin: 0; text-align: right; color: #65685e; }
       </details>
       <div id="flip-controls" hidden><div id="flip-colors" role="group" aria-label="Цвет стороны"></div><button id="flip-orientation" title="Сменить ориентацию" aria-label="Сменить ориентацию">▭</button><button id="flip-image-upload" title="Добавить картинку на эту сторону" aria-label="Добавить картинку на эту сторону">▧</button><button id="flip-image-remove" title="Убрать картинку с этой стороны" aria-label="Убрать картинку с этой стороны">×</button><button id="flip-toolbar-button" title="Перевернуть" aria-label="Перевернуть">↻</button><input id="flip-image-file" type="file" accept="image/*" hidden></div>
       <div id="image-controls" hidden><details id="image-mask"><summary title="Маска изображения">Маска ▾</summary><div class="image-menu"><button data-image-mask="original">Исходное</button><button data-image-mask="custom">Обрезать вручную…</button><button data-image-mask="circle">Круг</button><button data-image-mask="square">Квадрат</button><button data-image-mask="portrait">Портрет · 3:4</button><button data-image-mask="landscape">Альбом · 4:3</button><button data-image-mask="wide">Широкое · 16:9</button></div></details><details id="image-stroke"><summary title="Обводка изображения">Обводка ▾</summary><div class="image-menu image-stroke-menu"><label>Цвет <input id="image-stroke-color" type="color" aria-label="Цвет обводки" value="#ffcc33"></label><label>Толщина <input id="image-stroke-width" type="number" min="0" max="30" step="1" value="0" aria-label="Толщина обводки"></label><label>Скругление <input id="image-stroke-radius" type="number" min="0" max="200" step="1" value="0" aria-label="Скругление углов"></label><label>Прозрачность <input id="image-stroke-opacity" type="range" min="5" max="100" value="100" aria-label="Непрозрачность обводки"></label><label>Линия <select id="image-stroke-style" aria-label="Стиль обводки"><option value="solid">Сплошная</option><option value="dashed">Пунктир</option><option value="dotted">Точки</option></select></label></div></details><button id="image-crop-apply" hidden>Готово</button><button id="image-crop-cancel" hidden>Отмена</button></div>
+      <div id="shape-controls" hidden><select id="shape-kind" aria-label="Фигура"><option value="rect">Прямоугольник</option><option value="ellipse">Эллипс</option><option value="diamond">Ромб</option><option value="triangle">Треугольник</option></select><label>Заливка <input id="shape-fill" type="color"></label><label><input id="shape-transparent" type="checkbox">Без заливки</label><label>Обводка <input id="shape-stroke" type="color"></label><input id="shape-width" type="number" min="0" max="30" step="0.5" aria-label="Толщина обводки"><label id="shape-radius-control">Скругление <input id="shape-radius" type="number" min="0" max="10000" step="1" value="0" aria-label="Радиус скругления углов"></label></div>
       <div id="table-controls" hidden><button data-table-action="add-col" title="Добавить столбец" aria-label="Добавить столбец">⊞</button><button data-table-action="add-row" title="Добавить строку" aria-label="Добавить строку">⊟</button><button data-table-action="equal-col" title="Выровнять ширину столбцов" aria-label="Выровнять ширину столбцов">↔</button><button data-table-action="equal-row" title="Выровнять высоту строк" aria-label="Выровнять высоту строк">↕</button><input id="table-border-width" type="number" min="0.5" max="12" step="0.5" value="1" aria-label="Толщина границы"><input id="table-border-color" type="color" value="#b7bec6" aria-label="Цвет границы"><details id="table-more"><summary title="Ещё действия с таблицей" aria-label="Ещё действия с таблицей">⋮</summary><div class="table-more-menu"><button data-table-action="remove-row">Удалить строку</button><button data-table-action="remove-col">Удалить столбец</button><button data-table-action="delete-table">Удалить таблицу</button></div></details></div>
       <button id="remove-wallet" title="Удалить кошелёк" aria-label="Удалить кошелёк"><svg class="icon"><use href="#i-bin"/></svg></button>
     </div>
@@ -529,18 +576,24 @@ dd { margin: 0; text-align: right; color: #65685e; }
     <hr>
     <button type="button" role="menuitem" data-action="delete">Удалить</button>
   </div>
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <div class="confirm-card"><div class="confirm-icon" aria-hidden="true">!</div><h2 id="confirm-title">Удалить счётчик?</h2><p id="confirm-message">Все его блоки и значения будут удалены.</p><div class="confirm-actions"><button type="button" data-confirm-cancel>Отмена</button><button type="button" class="danger" data-confirm-accept>Удалить счётчик</button></div></div>
+  </dialog>
   <aside class="tools" aria-label="Инструменты">
     <input id="image-file" type="file" accept="image/*" multiple hidden>
     <button id="select-tool" class="tool" aria-label="Выбор (V)" title="Выбор (V)" aria-pressed="true"><svg class="icon"><use href="#i-pointer"/></svg></button>
     <button id="image-tool" class="tool" aria-label="Добавить изображение" title="Добавить изображение или вставить Ctrl+V"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m3 18 6-6 4 4 4-6 4 5"/></svg></button>
     <button id="note-tool" class="tool" aria-label="Стикер (N)" title="Стикер (N)" aria-pressed="false"><svg class="icon"><use href="#i-note"/></svg></button>
     <button id="flip-tool" class="tool" aria-label="Флип-карточка" title="Добавить флип-карточку" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M2 10a9 9 0 0 1 15-6m0 0h-4m4 0v4M22 14a9 9 0 0 1-15 6m0 0h4m-4 0v-4"/></svg></button>
+    <button id="shape-tool" class="tool" aria-label="Фигуры" title="Нарисовать фигуру" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="11" height="11" rx="1"/><circle cx="16" cy="16" r="5"/></svg></button>
     <button id="text-tool" class="tool" aria-label="Текстовая область (T)" title="Текстовая область (T)" aria-pressed="false"><svg class="icon"><use href="#i-text"/></svg></button>
-    <button id="table-tool" class="tool" aria-label="Таблица (G)" title="Таблица (G)" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg></button>
+    <button id="table-tool" class="tool" aria-label="Свободная сетка (G)" title="Свободная сетка (G)" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg></button>
+    <button id="records-tool" class="tool" aria-label="Таблица записей" title="Таблица записей" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 8h18M8 8v13M3 14h18M13 11h5M13 17h5"/></svg></button>
     <button id="rpg-tool" class="tool" aria-label="Лист персонажа" title="Имя, ход и навыки персонажа" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 2 9 6v8l-9 6-9-6V8Z M12 2v20 M3 8l18 8 M21 8 3 16"/></svg></button>
     <button id="counter-tool" class="tool" aria-label="Добавить счётчик" title="Универсальный счётчик с пресетами"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6m-8 0v6"/></svg></button>
     <button id="wallet-tool" class="tool" aria-label="Кошелёк (W)" title="Кошелёк (W)" aria-pressed="false"><svg class="icon"><use href="#i-wallet"/></svg></button>
   </aside>
+  <div id="shape-picker" hidden><button data-shape="rect">▭ Прямоугольник</button><button data-shape="ellipse">◯ Эллипс</button><button data-shape="diamond">◇ Ромб</button><button data-shape="triangle">△ Треугольник</button></div>
   <footer>
     <div class="help-area">
       <button id="help" class="help-button" title="Подсказки" aria-label="Подсказки" aria-expanded="false" aria-controls="help-panel"><svg class="icon"><use href="#i-help"/></svg></button>
@@ -562,6 +615,7 @@ dd { margin: 0; text-align: right; color: #65685e; }
       <dt>Сгруппировать</dt><dd><kbd>Ctrl</kbd> + <kbd>G</kbd></dd>
       <dt>Разгруппировать</dt><dd><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></dd>
       <dt>Новый стикер</dt><dd><kbd>N</kbd> и клик</dd>
+      <dt>Фигуры</dt><dd>Выберите фигуру и потяните на холсте</dd>
       <dt>Новая таблица</dt><dd><kbd>G</kbd> и клик или протяжка</dd>
       <dt>Текстовая область</dt><dd><kbd>T</kbd> и клик или протяжка</dd>
       <dt>Кошелёк</dt><dd><kbd>W</kbd> и клик</dd>
@@ -575,8 +629,8 @@ dd { margin: 0; text-align: right; color: #65685e; }
   </section>
   <script src="backup.js"></script>
   <script src="desktop-backup.js"></script>
-  <script src="counter.js"></script>
+  <script src="counter.js?v=counter-help-1"></script>
   <script src="rpg.js"></script>
-  <script src="board.js?v=clipboard-layers-5"></script>
+  <script src="board.js?v=record-table-v4"></script>
 </body>
 </html>
